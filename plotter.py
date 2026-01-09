@@ -99,12 +99,16 @@ class BacktestPlotter:
         ax.plot(common_idx, close_aligned, label='Close Price', 
                 color='black', linewidth=1.5, alpha=0.8)
         
-        # Highlight when in position
+        # Highlight when in position - use actual y-values for better visualization
         in_position = positions > 0
         if in_position.any():
-            ax.fill_between(common_idx, close_aligned.min(), close_aligned.max(), 
-                           where=in_position, alpha=0.2, color='green', 
-                           label='In Position')
+            # Create a mask that properly handles transitions
+            y_min = close_aligned.min() * 0.98  # Slightly below minimum
+            y_max = close_aligned.max() * 1.02  # Slightly above maximum
+            
+            ax.fill_between(common_idx, y_min, y_max, 
+                           where=in_position, alpha=0.15, color='green', 
+                           label='In Position', interpolate=True)
         
         # Add entry/exit points
         position_changes = positions.diff()
