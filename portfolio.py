@@ -65,10 +65,25 @@ class Portfolio:
             
         close_dict = {}
         for ticker, data in self.data.items():
-            if 'Close' in data.columns:
-                close_dict[ticker] = data['Close']
+            # Handle both single and multi-ticker downloads
+            if isinstance(data, pd.DataFrame):
+                if 'Close' in data.columns:
+                    close_series = data['Close']
+                    # If Close is a DataFrame (single ticker with MultiIndex columns)
+                    if isinstance(close_series, pd.DataFrame):
+                        # Get the first (and only) column as a Series
+                        close_dict[ticker] = close_series.iloc[:, 0]
+                    else:
+                        # Already a Series
+                        close_dict[ticker] = close_series
+                elif len(data.columns) == 1:
+                    # Single column DataFrame
+                    close_dict[ticker] = data.iloc[:, 0]
+            elif isinstance(data, pd.Series):
+                close_dict[ticker] = data
         
         if close_dict:
+            # Create DataFrame from dictionary of Series
             self.close_prices = pd.DataFrame(close_dict)
             
     def _calculate_returns(self) -> None:
@@ -88,14 +103,19 @@ class Portfolio:
         Returns:
         --------
         pd.Series or pd.DataFrame
-            Close prices
+            Close prices (Series if single ticker specified, DataFrame otherwise)
         """
+        if self.close_prices is None:
+            raise ValueError("No data loaded. Call load_data() first.")
+            
         if ticker:
-            if ticker in self.data:
-                return self.data[ticker]['Close']
+            if ticker in self.close_prices.columns:
+                # Return as Series
+                return self.close_prices[ticker]
             else:
-                raise ValueError(f"Ticker {ticker} not found in portfolio")
-        return self.close_prices
+                raise ValueError(f"Ticker {ticker} not found in loaded data")
+        else:
+            return self.close_prices
     
     def get_returns(self, ticker: Optional[str] = None) -> pd.Series or pd.DataFrame:
         """
