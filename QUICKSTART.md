@@ -35,6 +35,23 @@ This will test all 7 alpha models with 4 different strategies:
 
 **Note**: This takes ~15-30 minutes to complete.
 
+### 2a. Save Results and Plots
+
+Save organized output with timestamped directory:
+```bash
+python run_comparison.py SPY 2018-01-01 2024-12-31 --save-plots
+```
+
+This creates:
+- `results_YYYYMMDD_HHMMSS/` directory
+- CSV file with all results
+- PNG plots for visualization
+
+Custom output directory:
+```bash
+python run_comparison.py SPY 2018-01-01 2024-12-31 --output-dir my_experiment --save-plots
+```
+
 ### 3. Run Tests
 
 ```bash

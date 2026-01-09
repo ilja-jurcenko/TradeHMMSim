@@ -115,10 +115,22 @@ With custom parameters:
 python run_comparison.py SPY 2018-01-01 2024-12-31
 ```
 
-With visualization:
+With organized output (timestamped directory):
 ```bash
-python run_comparison.py --plot
+python run_comparison.py SPY 2018-01-01 2024-12-31 --save-plots
 ```
+
+With custom output directory:
+```bash
+python run_comparison.py SPY 2018-01-01 2024-12-31 --output-dir my_results --save-plots
+```
+
+**Output Management:**
+- By default, creates `results_YYYYMMDD_HHMMSS/` directory with timestamp
+- Saves CSV results: `comparison_TICKER_START_END.csv`
+- Saves plots: `comparison_plots_TICKER.png` (when `--save-plots` is used)
+- Custom directory: Use `--output-dir <path>` to specify custom location
+- All results organized in single directory for easy tracking of experiments
 
 ### Visualization Examples
 
