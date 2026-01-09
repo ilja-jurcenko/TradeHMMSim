@@ -19,8 +19,8 @@ from datetime import datetime
 
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA
+from signal_filter import HMMRegimeFilter
 
 
 class TestPortfolioMultiIndex(unittest.TestCase):

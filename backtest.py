@@ -5,8 +5,8 @@ Backtest simulation engine with walk-forward testing and rebalancing.
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, List
-from AlphaModels.base import AlphaModel
-from SignalFilter.hmm_filter import HMMRegimeFilter
+from alpha_models.base import AlphaModel
+from signal_filter.hmm_filter import HMMRegimeFilter
 from statistics import Statistics
 
 

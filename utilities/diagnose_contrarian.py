@@ -1,7 +1,7 @@
 """Diagnose contrarian strategy behavior"""
 from portfolio import Portfolio
-from AlphaModels import EMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import EMA
+from signal_filter import HMMRegimeFilter
 import pandas as pd
 
 # Load data

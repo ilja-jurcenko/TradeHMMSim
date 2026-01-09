@@ -152,8 +152,8 @@ python example_plotting.py 4  # HMM regime analysis
 ```python
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA
+from signal_filter import HMMRegimeFilter
 from plotter import BacktestPlotter
 
 # Load data

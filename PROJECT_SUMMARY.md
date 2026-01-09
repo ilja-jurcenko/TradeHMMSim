@@ -220,7 +220,7 @@ TradeHMMSim/
 ```python
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA
+from alpha_models import SMA
 
 portfolio = Portfolio(['SPY'], '2020-01-01', '2024-12-31')
 portfolio.load_data()
@@ -234,7 +234,7 @@ engine.print_results()
 
 ### With HMM Filtering
 ```python
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 
 hmm = HMMRegimeFilter(n_states=3)
 engine = BacktestEngine(close, model, hmm_filter=hmm)

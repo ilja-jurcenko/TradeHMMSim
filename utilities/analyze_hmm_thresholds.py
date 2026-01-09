@@ -5,8 +5,8 @@ Analyze HMM probability distributions and threshold effectiveness.
 import numpy as np
 import pandas as pd
 from portfolio import Portfolio
-from AlphaModels import EMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import EMA
+from signal_filter import HMMRegimeFilter
 
 # Load data
 portfolio = Portfolio(['SPY'], '2020-01-01', '2025-12-31')

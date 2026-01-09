@@ -5,7 +5,7 @@ Unit tests for HMM Signal Filter.
 import unittest
 import pandas as pd
 import numpy as np
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 
 
 class TestHMMFilter(unittest.TestCase):

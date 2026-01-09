@@ -7,7 +7,7 @@ Different approaches to evaluate how well the HMM identifies market regimes.
 import numpy as np
 import pandas as pd
 from portfolio import Portfolio
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

@@ -29,8 +29,8 @@ The `plotter.py` module provides comprehensive visualization capabilities for ba
 ```python
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA
+from signal_filter import HMMRegimeFilter
 from plotter import BacktestPlotter
 
 # Setup and run backtest
@@ -78,7 +78,7 @@ BacktestPlotter.plot_metrics_comparison(results_list, labels)
 ### Example 3: HMM Regime Analysis
 
 ```python
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 
 # Train HMM
 hmm_filter = HMMRegimeFilter(n_states=3, random_state=42)
@@ -102,7 +102,7 @@ BacktestPlotter.plot_regime_analysis(probs_df, regime, close, switches)
 ### Example 4: Compare Different Alpha Models
 
 ```python
-from AlphaModels import SMA, EMA, KAMA
+from alpha_models import SMA, EMA, KAMA
 
 models = [
     ('SMA', SMA(10, 30)),

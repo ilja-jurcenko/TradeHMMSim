@@ -5,7 +5,7 @@ Unit tests for AlphaModels.
 import unittest
 import pandas as pd
 import numpy as np
-from AlphaModels import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
+from alpha_models import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
 
 
 class TestAlphaModels(unittest.TestCase):

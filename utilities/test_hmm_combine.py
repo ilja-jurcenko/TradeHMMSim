@@ -1,6 +1,6 @@
 """Quick test to verify HMM combine logic is using bull+neutral"""
 from portfolio import Portfolio
-from AlphaModels import EMA
+from alpha_models import EMA
 from backtest import BacktestEngine
 
 # Setup

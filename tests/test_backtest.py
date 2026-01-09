@@ -6,8 +6,8 @@ import unittest
 import pandas as pd
 import numpy as np
 from backtest import BacktestEngine
-from AlphaModels import SMA, EMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA, EMA
+from signal_filter import HMMRegimeFilter
 
 
 class TestBacktestEngine(unittest.TestCase):

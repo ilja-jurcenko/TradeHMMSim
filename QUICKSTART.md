@@ -69,8 +69,8 @@ Create a new file `my_backtest.py`:
 ```python
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA
+from signal_filter import HMMRegimeFilter
 
 # Load data
 portfolio = Portfolio(['SPY'], '2020-01-01', '2024-12-31')

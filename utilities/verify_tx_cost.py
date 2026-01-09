@@ -1,8 +1,8 @@
 """Verify HMM Only with transaction costs"""
 from portfolio import Portfolio
-from AlphaModels import EMA
+from alpha_models import EMA
 from backtest import BacktestEngine
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 
 portfolio = Portfolio(['SPY'], '2020-01-01', '2025-12-31')
 portfolio.load_data()

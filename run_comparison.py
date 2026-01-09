@@ -8,8 +8,8 @@ import os
 from datetime import datetime
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from AlphaModels import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
-from SignalFilter import HMMRegimeFilter
+from alpha_models import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
+from signal_filter import HMMRegimeFilter
 from statistics import Statistics
 from plotter import BacktestPlotter
 from plotter import BacktestPlotter

@@ -1,8 +1,8 @@
 """Check HMM Only strategy behavior"""
 from portfolio import Portfolio
-from AlphaModels import EMA, SMA, KAMA
+from alpha_models import EMA, SMA, KAMA
 from backtest import BacktestEngine
-from SignalFilter import HMMRegimeFilter
+from signal_filter import HMMRegimeFilter
 
 # Load data
 portfolio = Portfolio(['SPY'], '2020-01-01', '2025-12-31')
