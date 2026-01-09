@@ -140,13 +140,18 @@ class BacktestEngine:
             # Get regime probabilities
             bear_prob = probs[bear_regime].loc[common_idx]
             bull_prob = probs[bull_regime].loc[common_idx]
+            
+            # Combine bull + neutral for non-bearish signal
+            # Neutral markets are generally safe for trading, so treat bull+neutral as favorable
+            bull_prob_combined = bull_prob.copy()
             if neutral_regime is not None:
-                bull_prob = bull_prob + probs[neutral_regime].loc[common_idx]
+                bull_prob_combined = bull_prob + probs[neutral_regime].loc[common_idx]
             
             # Apply strategy logic
             if strategy_mode == 'hmm_only':
                 # HMM only: ignore alpha signals
-                positions = (bull_prob > bull_prob_threshold).astype(int)
+                # Use combined bull+neutral probability
+                positions = (bull_prob_combined > bull_prob_threshold).astype(int)
                 
             elif strategy_mode == 'alpha_hmm_filter':
                 # Alpha + HMM filter: HMM only filters out during bear regime
@@ -155,9 +160,9 @@ class BacktestEngine:
                 
             elif strategy_mode == 'alpha_hmm_combine':
                 # Alpha + HMM combine: Take position when either alpha OR HMM signals bullish
-                # Position = alpha_signal OR (bull_prob > threshold AND bear_prob < threshold)
-                # This combines both models' insights rather than one overriding the other
-                hmm_signal = ((bull_prob > bull_prob_threshold) & (bear_prob < bear_prob_threshold)).astype(int)
+                # Position = alpha_signal OR (bull+neutral > threshold AND bear < threshold)
+                # Using bull+neutral makes HMM signal more sensitive with 3-state model
+                hmm_signal = ((bull_prob_combined > bull_prob_threshold) & (bear_prob < bear_prob_threshold)).astype(int)
                 positions = (alpha_signals_aligned | hmm_signal).astype(int)
             
             # Store regime info for later use
