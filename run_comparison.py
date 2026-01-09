@@ -63,10 +63,14 @@ def run_comparison(ticker: str = 'SPY',
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
     print("="*80)
     
-    # Create output directory with timestamp
+    # Create output directory with timestamp in results folder
     if output_dir is None:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_dir = f'results_{timestamp}'
+        output_dir = os.path.join('results', f'run_{timestamp}')
+    else:
+        # If custom dir specified, still put it under results/
+        if not output_dir.startswith('results/'):
+            output_dir = os.path.join('results', output_dir)
     
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nOutput directory: {output_dir}")
@@ -297,6 +301,74 @@ def run_comparison(ticker: str = 'SPY',
     output_file = os.path.join(output_dir, f'comparison_{ticker}_{start_date}_{end_date}.csv')
     results_df.to_csv(output_file, index=False)
     print(f"\n✓ Results saved to {output_file}")
+    
+    # Create markdown analysis report
+    md_file = os.path.join(output_dir, 'ANALYSIS.md')
+    with open(md_file, 'w') as f:
+        f.write(f"# Backtest Analysis Report\n\n")
+        f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"**Ticker:** {ticker}\n\n")
+        f.write(f"**Period:** {start_date} to {end_date}\n\n")
+        f.write(f"---\n\n")
+        
+        # Benchmark performance
+        f.write(f"## Benchmark Performance (Buy & Hold)\n\n")
+        f.write(f"- **Total Return:** {benchmark_metrics['total_return']*100:.2f}%\n")
+        f.write(f"- **Sharpe Ratio:** {benchmark_metrics['sharpe_ratio']:.2f}\n")
+        f.write(f"- **Max Drawdown:** {benchmark_metrics['max_drawdown']*100:.2f}%\n\n")
+        f.write(f"---\n\n")
+        
+        # Top strategies
+        f.write(f"## Top 10 Strategies by Total Return\n\n")
+        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) |\n")
+        f.write("|-------|----------|------------------|--------------|------------------|\n")
+        for _, row in results_df.sort_values('Total Return (%)', ascending=False).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} |\n")
+        f.write("\n")
+        
+        # Top by Sharpe
+        f.write(f"## Top 10 Strategies by Sharpe Ratio\n\n")
+        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) |\n")
+        f.write("|-------|----------|------------------|--------------|------------------|\n")
+        for _, row in results_df.sort_values('Sharpe Ratio', ascending=False).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} |\n")
+        f.write("\n")
+        
+        # Average performance by strategy type
+        f.write(f"## Average Performance by Strategy Type\n\n")
+        f.write("| Strategy | Avg Total Return (%) | Avg Sharpe Ratio | Avg Max Drawdown (%) | Avg Num Trades | Avg Time in Market (%) |\n")
+        f.write("|----------|----------------------|------------------|----------------------|----------------|------------------------|\n")
+        for strategy, row in avg_by_strategy.iterrows():
+            f.write(f"| {strategy} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.2f} | {row['Time in Market (%)']:.2f} |\n")
+        f.write("\n")
+        
+        # HMM Impact Analysis
+        f.write(f"## HMM Impact Analysis\n\n")
+        for model_name in results_df['Model'].unique():
+            model_data = results_df[results_df['Model'] == model_name]
+            alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
+            hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
+            alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
+            alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
+            
+            f.write(f"### {model_name}\n\n")
+            f.write(f"- **Alpha Only Return:** {alpha_only['Total Return (%)']:.2f}%\n")
+            f.write(f"- **HMM Only Return:** {hmm_only['Total Return (%)']:.2f}%\n")
+            f.write(f"- **Alpha + Filter Return:** {alpha_filter['Total Return (%)']:.2f}%\n")
+            f.write(f"- **Alpha + Combine Return:** {alpha_combine['Total Return (%)']:.2f}%\n")
+            f.write(f"- **HMM Filter Impact:** {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n")
+            f.write(f"- **HMM Combine Impact:** {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n\n")
+        
+        # Files generated
+        f.write(f"---\n\n")
+        f.write(f"## Generated Files\n\n")
+        f.write(f"- **CSV Results:** `comparison_{ticker}_{start_date}_{end_date}.csv`\n")
+        if save_plots:
+            f.write(f"- **Summary Plots:** `comparison_plots_{ticker}.png`\n")
+            f.write(f"- **Individual Plots:** `individual_plots/` (28 plots)\n")
+        f.write(f"\n")
+    
+    print(f"✓ Analysis report saved to {md_file}")
     
     # Generate and save plots if requested
     if save_plots:
