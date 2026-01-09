@@ -209,6 +209,7 @@ class BacktestEngine:
             'equity_curve': equity_curve,
             'positions': positions,
             'returns': strategy_returns,
+            'close_prices': self.close,
             'num_trades': num_trades,
             'time_in_market': time_in_market,
             'strategy_mode': strategy_mode,

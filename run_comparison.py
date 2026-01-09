@@ -12,6 +12,7 @@ from AlphaModels import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
 from SignalFilter import HMMRegimeFilter
 from statistics import Statistics
 from plotter import BacktestPlotter
+from plotter import BacktestPlotter
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for saving plots
 import matplotlib.pyplot as plt
@@ -70,6 +71,11 @@ def run_comparison(ticker: str = 'SPY',
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nOutput directory: {output_dir}")
     
+    # Create subdirectory for individual plots
+    if save_plots:
+        plots_dir = os.path.join(output_dir, 'individual_plots')
+        os.makedirs(plots_dir, exist_ok=True)
+    
     # Default models
     if alpha_models is None:
         alpha_models = [SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA]
@@ -107,6 +113,12 @@ def run_comparison(ticker: str = 'SPY',
             transaction_cost=transaction_cost
         )
         
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_Only.png')
+            BacktestPlotter.plot_results(results_alpha, close, save_path=plot_file)
+            plt.close('all')
+        
         results_list.append({
             'Model': model_name,
             'Strategy': 'Alpha Only',
@@ -133,6 +145,12 @@ def run_comparison(ticker: str = 'SPY',
             rebalance_frequency=rebalance_frequency,
             transaction_cost=transaction_cost
         )
+        
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_HMM_Only.png')
+            BacktestPlotter.plot_results(results_hmm, close, save_path=plot_file)
+            plt.close('all')
         
         results_list.append({
             'Model': model_name,
@@ -161,6 +179,12 @@ def run_comparison(ticker: str = 'SPY',
             transaction_cost=transaction_cost
         )
         
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Filter.png')
+            BacktestPlotter.plot_results(results_filter, close, save_path=plot_file)
+            plt.close('all')
+        
         results_list.append({
             'Model': model_name,
             'Strategy': 'Alpha + HMM Filter',
@@ -187,6 +211,12 @@ def run_comparison(ticker: str = 'SPY',
             rebalance_frequency=rebalance_frequency,
             transaction_cost=transaction_cost
         )
+        
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine.png')
+            BacktestPlotter.plot_results(results_combine, close, save_path=plot_file)
+            plt.close('all')
         
         results_list.append({
             'Model': model_name,
@@ -322,7 +352,13 @@ def run_comparison(ticker: str = 'SPY',
         plot_file = os.path.join(output_dir, f'comparison_plots_{ticker}.png')
         plt.savefig(plot_file, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f"✓ Plots saved to {plot_file}")
+        print(f"✓ Summary plots saved to {plot_file}")
+        
+        # Count individual plots
+        num_models = len(alpha_models)
+        num_plots = num_models * 4  # 4 strategies per model
+        print(f"✓ Individual plots saved to {os.path.join(output_dir, 'individual_plots/')}")
+        print(f"  Total: {num_plots} plots ({num_models} models × 4 strategies)")
     
     return results_df, output_dir
 

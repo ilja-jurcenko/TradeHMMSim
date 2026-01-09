@@ -13,7 +13,7 @@ class BacktestPlotter:
     """
     
     @staticmethod
-    def plot_results(results: dict, close: pd.Series, figsize: tuple = (14, 12)) -> None:
+    def plot_results(results: dict, close: pd.Series, figsize: tuple = (14, 12), save_path: str = None) -> None:
         """
         Plot comprehensive backtest results with 4 subplots.
         
@@ -25,6 +25,8 @@ class BacktestPlotter:
             Close price series
         figsize : tuple
             Figure size (width, height)
+        save_path : str, optional
+            Path to save the figure. If None, displays the plot.
         """
         fig, axes = plt.subplots(4, 1, figsize=figsize, sharex=True)
         
@@ -44,7 +46,11 @@ class BacktestPlotter:
         BacktestPlotter._plot_drawdowns(axes[3], results)
         
         plt.tight_layout()
-        plt.show()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        else:
+            plt.show()
     
     @staticmethod
     def _plot_cumulative_returns(ax, results: dict) -> None:
@@ -55,18 +61,16 @@ class BacktestPlotter:
         # Strategy cumulative return
         strategy_cum = equity / initial_capital
         
-        # Benchmark cumulative return
-        returns = results['returns']
-        positions = results['positions']
-        
-        # Calculate buy-and-hold returns
-        if len(returns) > 0 and len(positions) > 0:
-            # Get price returns (not strategy returns)
-            common_idx = returns.index
-            price_returns = returns / positions.shift(1).fillna(0).replace(0, 1)  # Recover price returns
-            price_returns = price_returns.fillna(0)
-            benchmark_cum = (1 + price_returns).cumprod()
+        # Benchmark cumulative return (Buy & Hold)
+        if 'close_prices' in results:
+            close_prices = results['close_prices']
+            # Align with strategy index
+            common_idx = strategy_cum.index
+            close_aligned = close_prices.loc[common_idx]
+            # Calculate buy and hold cumulative return
+            benchmark_cum = close_aligned / close_aligned.iloc[0]
         else:
+            # Fallback if close_prices not available
             benchmark_cum = pd.Series([1] * len(equity), index=equity.index)
         
         ax.plot(strategy_cum.index, strategy_cum.values, 
