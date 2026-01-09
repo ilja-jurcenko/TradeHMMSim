@@ -76,10 +76,14 @@ class HMMRegimeFilter:
         
         Parameters:
         -----------
-        features : pd.DataFrame
+        features : pd.DataFrame or np.ndarray
             Feature matrix (typically returns and volatility)
         """
-        X = features.values
+        # Handle both DataFrame and numpy array inputs
+        if isinstance(features, pd.DataFrame):
+            X = features.values
+        else:
+            X = features
         X_scaled = self.scaler.fit_transform(X)
         
         self.model = GaussianHMM(
@@ -99,7 +103,7 @@ class HMMRegimeFilter:
         
         Parameters:
         -----------
-        features : pd.DataFrame
+        features : pd.DataFrame or np.ndarray
             Feature matrix
             
         Returns:
@@ -110,7 +114,11 @@ class HMMRegimeFilter:
         if not self.is_fitted:
             raise ValueError("Model must be fitted before prediction")
         
-        X = features.values
+        # Handle both DataFrame and numpy array inputs
+        if isinstance(features, pd.DataFrame):
+            X = features.values
+        else:
+            X = features
         X_scaled = self.scaler.transform(X)
         return self.model.predict(X_scaled)
     
@@ -120,7 +128,7 @@ class HMMRegimeFilter:
         
         Parameters:
         -----------
-        features : pd.DataFrame
+        features : pd.DataFrame or np.ndarray
             Feature matrix
             
         Returns:
@@ -131,7 +139,11 @@ class HMMRegimeFilter:
         if not self.is_fitted:
             raise ValueError("Model must be fitted before prediction")
         
-        X = features.values
+        # Handle both DataFrame and numpy array inputs
+        if isinstance(features, pd.DataFrame):
+            X = features.values
+        else:
+            X = features
         X_scaled = self.scaler.transform(X)
         return self.model.predict_proba(X_scaled)
     
@@ -142,7 +154,7 @@ class HMMRegimeFilter:
         
         Parameters:
         -----------
-        features : pd.DataFrame
+        features : pd.DataFrame or np.ndarray
             Feature matrix
             
         Returns:
@@ -153,7 +165,11 @@ class HMMRegimeFilter:
         if not self.is_fitted:
             raise ValueError("Model must be fitted before prediction")
         
-        X = features.values
+        # Handle both DataFrame and numpy array inputs
+        if isinstance(features, pd.DataFrame):
+            X = features.values
+        else:
+            X = features
         X_scaled = self.scaler.transform(X)
         
         # Get model parameters
