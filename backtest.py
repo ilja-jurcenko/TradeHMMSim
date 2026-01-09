@@ -63,7 +63,7 @@ class BacktestEngine:
             - 'alpha_only': Alpha model signals only
             - 'hmm_only': HMM regime signals only
             - 'alpha_hmm_filter': HMM filters incorrect alpha signals (bear filter)
-            - 'alpha_hmm_override': HMM can override alpha signals
+            - 'alpha_hmm_combine': Combine alpha and HMM signals (take position when either signals)
         rebalance_frequency : int
             Rebalancing frequency (1 = every period, 5 = every 5 periods, etc.)
         walk_forward : bool
@@ -153,13 +153,12 @@ class BacktestEngine:
                 bear_filter = (bear_prob < bear_prob_threshold).astype(int)
                 positions = alpha_signals_aligned * bear_filter
                 
-            elif strategy_mode == 'alpha_hmm_override':
-                # Alpha + HMM override: HMM corrects alpha signals
-                # Take position when: (alpha=1 AND bear_prob<threshold) OR (alpha=0 AND bull_prob>threshold)
-                # This allows HMM to filter out wrong alpha signals and add positions when alpha misses opportunities
-                bear_filter = (bear_prob < bear_prob_threshold).astype(int)
-                bull_override = ((1 - alpha_signals_aligned) * (bull_prob > bull_prob_threshold)).astype(int)
-                positions = ((alpha_signals_aligned * bear_filter) | bull_override).astype(int)
+            elif strategy_mode == 'alpha_hmm_combine':
+                # Alpha + HMM combine: Take position when either alpha OR HMM signals bullish
+                # Position = alpha_signal OR (bull_prob > threshold AND bear_prob < threshold)
+                # This combines both models' insights rather than one overriding the other
+                hmm_signal = ((bull_prob > bull_prob_threshold) & (bear_prob < bear_prob_threshold)).astype(int)
+                positions = (alpha_signals_aligned | hmm_signal).astype(int)
             
             # Store regime info for later use
             self.regime_probs = probs

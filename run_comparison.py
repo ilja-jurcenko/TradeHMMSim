@@ -156,12 +156,12 @@ def run_comparison(ticker: str = 'SPY',
             'Time in Market (%)': results_filter['time_in_market'] * 100
         })
         
-        # Strategy 4: Alpha + HMM Override
-        print(f"\n[4/4] Running {model_name} - Alpha + HMM Override...")
+        # Strategy 4: Alpha + HMM Combine
+        print(f"\n[4/4] Running {model_name} - Alpha + HMM Combine...")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_override = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
-        results_override = engine_override.run(
-            strategy_mode='alpha_hmm_override',
+        engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+        results_combine = engine_combine.run(
+            strategy_mode='alpha_hmm_combine',
             walk_forward=True,
             train_window=504,
             refit_every=21,
@@ -171,16 +171,16 @@ def run_comparison(ticker: str = 'SPY',
         
         results_list.append({
             'Model': model_name,
-            'Strategy': 'Alpha + HMM Override',
-            'Total Return (%)': results_override['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_override['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_override['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_override['metrics']['sortino_ratio'],
-            'Max Drawdown (%)': results_override['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_override['metrics']['profit_factor'],
-            'Win Rate (%)': results_override['metrics']['win_rate'] * 100,
-            'Num Trades': results_override['num_trades'],
-            'Time in Market (%)': results_override['time_in_market'] * 100
+            'Strategy': 'Alpha + HMM Combine',
+            'Total Return (%)': results_combine['metrics']['total_return'] * 100,
+            'Annual Return (%)': results_combine['metrics']['annualized_return'] * 100,
+            'Sharpe Ratio': results_combine['metrics']['sharpe_ratio'],
+            'Sortino Ratio': results_combine['metrics']['sortino_ratio'],
+            'Max Drawdown (%)': results_combine['metrics']['max_drawdown'] * 100,
+            'Profit Factor': results_combine['metrics']['profit_factor'],
+            'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
+            'Num Trades': results_combine['num_trades'],
+            'Time in Market (%)': results_combine['time_in_market'] * 100
         })
     
     # Create results DataFrame
@@ -234,15 +234,15 @@ def run_comparison(ticker: str = 'SPY',
         alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
         hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
         alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
-        alpha_override = model_data[model_data['Strategy'] == 'Alpha + HMM Override'].iloc[0]
+        alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
         
         print(f"\n{model_name}:")
         print(f"  Alpha Only Return: {alpha_only['Total Return (%)']:.2f}%")
         print(f"  HMM Only Return: {hmm_only['Total Return (%)']:.2f}%")
         print(f"  Alpha + Filter Return: {alpha_filter['Total Return (%)']:.2f}%")
-        print(f"  Alpha + Override Return: {alpha_override['Total Return (%)']:.2f}%")
+        print(f"  Alpha + Combine Return: {alpha_combine['Total Return (%)']:.2f}%")
         print(f"  HMM Filter Impact: {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
-        print(f"  HMM Override Impact: {alpha_override['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
+        print(f"  HMM Combine Impact: {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
     
     # Save results
     output_file = f'backtest_comparison_{ticker}_{start_date}_{end_date}.csv'

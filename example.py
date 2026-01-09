@@ -34,11 +34,11 @@ def simple_example():
     engine.print_results(include_benchmark=True)
     
     # Step 4: Add HMM filtering
-    print("\n4. Running backtest - Alpha + HMM Override...")
+    print("\n4. Running backtest - Alpha + HMM Combine...")
     hmm_filter = HMMRegimeFilter(n_states=3, random_state=42)
     engine_hmm = BacktestEngine(close, alpha_model, hmm_filter=hmm_filter, initial_capital=100000)
     results_hmm = engine_hmm.run(
-        strategy_mode='alpha_hmm_override',
+        strategy_mode='alpha_hmm_combine',
         walk_forward=True,
         train_window=252,  # 1 year
         refit_every=21     # Monthly
@@ -63,7 +63,7 @@ def simple_example():
     BacktestPlotter.plot_results(results_hmm, close)
     BacktestPlotter.plot_comparison(
         [results_alpha, results_hmm],
-        ['Alpha Only', 'Alpha + HMM Override']
+        ['Alpha Only', 'Alpha + HMM Combine']
     )
 
 

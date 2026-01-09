@@ -32,7 +32,7 @@ def example_single_backtest_plot():
     print("Running backtest...")
     engine = BacktestEngine(close, alpha_model, hmm_filter=hmm_filter, initial_capital=100000)
     results = engine.run(
-        strategy_mode='alpha_hmm_override',
+        strategy_mode='alpha_hmm_combine',
         walk_forward=True,
         train_window=252,
         refit_every=21
@@ -68,7 +68,7 @@ def example_strategy_comparison():
     strategies = [
         ('Alpha Only', 'alpha_only', False),
         ('HMM Filter', 'alpha_hmm_filter', True),
-        ('HMM Override', 'alpha_hmm_override', True),
+        ('HMM Combine', 'alpha_hmm_combine', True),
         ('HMM Only', 'hmm_only', True)
     ]
     

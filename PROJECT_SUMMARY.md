@@ -143,7 +143,7 @@ Comprehensive unit tests covering:
 - **alpha_only**: Pure alpha signals
 - **hmm_only**: Pure HMM signals
 - **alpha_hmm_filter**: HMM filters bear markets
-- **alpha_hmm_override**: HMM can override signals
+- **alpha_hmm_combine**: Combine both signals
 
 ### 5. Comprehensive Testing
 - 47+ unit tests
@@ -239,7 +239,7 @@ from SignalFilter import HMMRegimeFilter
 hmm = HMMRegimeFilter(n_states=3)
 engine = BacktestEngine(close, model, hmm_filter=hmm)
 results = engine.run(
-    strategy_mode='alpha_hmm_override',
+    strategy_mode='alpha_hmm_combine',
     walk_forward=True,
     rebalance_frequency=5
 )

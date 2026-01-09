@@ -31,7 +31,7 @@ This will test all 7 alpha models with 4 different strategies:
 - Alpha Only
 - HMM Only  
 - Alpha + HMM Filter
-- Alpha + HMM Override
+- Alpha + HMM Combine
 
 **Note**: This takes ~15-30 minutes to complete.
 
@@ -67,7 +67,7 @@ hmm_filter = HMMRegimeFilter(n_states=3)
 # Run backtest
 engine = BacktestEngine(close, alpha_model, hmm_filter=hmm_filter)
 results = engine.run(
-    strategy_mode='alpha_hmm_override',
+    strategy_mode='alpha_hmm_combine',
     walk_forward=True,
     rebalance_frequency=5,
     transaction_cost=0.001
@@ -132,10 +132,10 @@ Alpha model generates signals, HMM blocks trades during bear markets.
 results = engine.run(strategy_mode='alpha_hmm_filter', walk_forward=True)
 ```
 
-### 4. alpha_hmm_override (Recommended)
-Alpha model generates signals, but HMM can override during strong bull markets.
+### 4. alpha_hmm_combine (Recommended)
+Combine both alpha and HMM signals - take position when either indicates bullish conditions.
 ```python
-results = engine.run(strategy_mode='alpha_hmm_override', walk_forward=True)
+results = engine.run(strategy_mode='alpha_hmm_combine', walk_forward=True)
 ```
 
 ## Understanding Results

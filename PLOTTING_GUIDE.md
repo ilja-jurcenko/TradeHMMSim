@@ -42,7 +42,7 @@ alpha_model = SMA(short_window=10, long_window=30)
 hmm_filter = HMMRegimeFilter(n_states=3, random_state=42)
 
 engine = BacktestEngine(close, alpha_model, hmm_filter=hmm_filter)
-results = engine.run(strategy_mode='alpha_hmm_override', walk_forward=True)
+results = engine.run(strategy_mode='alpha_hmm_combine', walk_forward=True)
 
 # Generate 4-panel visualization
 BacktestPlotter.plot_results(results, close)
@@ -58,7 +58,7 @@ This creates a comprehensive 4-panel plot showing:
 
 ```python
 # Run multiple strategies
-strategies = ['alpha_only', 'alpha_hmm_filter', 'alpha_hmm_override']
+strategies = ['alpha_only', 'alpha_hmm_filter', 'alpha_hmm_combine']
 results_list = []
 labels = []
 

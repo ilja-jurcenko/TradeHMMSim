@@ -71,7 +71,7 @@ Seven different moving average strategies:
   - **Alpha Only**: Pure alpha model signals
   - **HMM Only**: HMM regime-based signals
   - **Alpha + HMM Filter**: HMM filters out bear regimes
-  - **Alpha + HMM Override**: HMM can override alpha signals
+  - **Alpha + HMM Combine**: Combine alpha and HMM signals
 - Configurable rebalancing frequency
 - Transaction cost modeling
 - Walk-forward testing
@@ -158,7 +158,7 @@ hmm_filter = HMMRegimeFilter(n_states=3)
 # Run backtest
 engine = BacktestEngine(close, alpha_model, hmm_filter=hmm_filter)
 results = engine.run(
-    strategy_mode='alpha_hmm_override',
+    strategy_mode='alpha_hmm_combine',
     walk_forward=True,
     rebalance_frequency=5,  # Rebalance every 5 days
     transaction_cost=0.001  # 0.1% transaction cost
@@ -212,9 +212,9 @@ results = engine.run(strategy_mode='hmm_only', walk_forward=True)
 results = engine.run(strategy_mode='alpha_hmm_filter', walk_forward=True)
 ```
 
-4. **alpha_hmm_override**: HMM can override alpha signals
+4. **alpha_hmm_combine**: Combine alpha and HMM signals
 ```python
-results = engine.run(strategy_mode='alpha_hmm_override', walk_forward=True)
+results = engine.run(strategy_mode='alpha_hmm_combine', walk_forward=True)
 ```
 
 ### Running Tests
@@ -242,7 +242,7 @@ The framework supports walk-forward testing to avoid lookahead bias:
 
 ```python
 results = engine.run(
-    strategy_mode='alpha_hmm_override',
+    strategy_mode='alpha_hmm_combine',
     walk_forward=True,
     train_window=504,      # 2 years of training data
     refit_every=21,        # Refit HMM every ~month
