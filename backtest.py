@@ -159,11 +159,29 @@ class BacktestEngine:
                 positions = alpha_signals_aligned * bear_filter
                 
             elif strategy_mode == 'alpha_hmm_combine':
-                # Alpha + HMM combine: Take position when either alpha OR HMM signals bullish
-                # Position = alpha_signal OR (bull+neutral > threshold AND bear < threshold)
-                # Using bull+neutral makes HMM signal more sensitive with 3-state model
-                hmm_signal = ((bull_prob_combined > bull_prob_threshold) & (bear_prob < bear_prob_threshold)).astype(int)
-                positions = (alpha_signals_aligned | hmm_signal).astype(int)
+                # Alpha + HMM combine: "Buy low" contrarian strategy
+                # Core idea: Use HMM to detect regime changes early
+                # 
+                # Strategy:
+                #   1. Follow alpha signals (trend-following base)
+                #   2. ADD contrarian entries: When alpha says no position but HMM predicts bull
+                #      -> Buy the dip before trend turns
+                #   3. DON'T do contrarian exits (too aggressive, cuts winning trades early)
+                #
+                # This creates asymmetry: Enter early, exit normally
+                
+                # Detect strong bull regime prediction
+                hmm_bull_signal = (bull_prob_combined > bull_prob_threshold).astype(bool)
+                
+                # Start with alpha signals as base
+                positions = alpha_signals_aligned.astype(bool).copy()
+                
+                # Contrarian ENTRY ONLY: Alpha says no position, but HMM predicts bull -> BUY THE DIP
+                # This catches early regime shifts when trend hasn't turned yet
+                contrarian_entry = (~alpha_signals_aligned.astype(bool)) & hmm_bull_signal
+                positions[contrarian_entry] = True
+                
+                positions = positions.astype(int)
             
             # Store regime info for later use
             self.regime_probs = probs
