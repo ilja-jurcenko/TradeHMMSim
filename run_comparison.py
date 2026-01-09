@@ -4,12 +4,17 @@ Main script to compare the impact of HMM model with AlphaModels.
 
 import pandas as pd
 import numpy as np
+import os
+from datetime import datetime
 from portfolio import Portfolio
 from backtest import BacktestEngine
 from AlphaModels import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
 from SignalFilter import HMMRegimeFilter
 from statistics import Statistics
 from plotter import BacktestPlotter
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for saving plots
+import matplotlib.pyplot as plt
 
 
 def run_comparison(ticker: str = 'SPY', 
@@ -19,7 +24,9 @@ def run_comparison(ticker: str = 'SPY',
                    short_window: int = 10,
                    long_window: int = 30,
                    rebalance_frequency: int = 1,
-                   transaction_cost: float = 0.001):
+                   transaction_cost: float = 0.001,
+                   output_dir: str = None,
+                   save_plots: bool = False):
     """
     Run comprehensive comparison of AlphaModels with and without HMM filtering.
     
@@ -41,15 +48,27 @@ def run_comparison(ticker: str = 'SPY',
         Rebalancing frequency in days
     transaction_cost : float
         Transaction cost per trade
+    output_dir : str, optional
+        Directory to save results. If None, creates timestamped directory
+    save_plots : bool
+        Whether to generate and save plots
         
     Returns:
     --------
-    pd.DataFrame
-        Comparison results
+    tuple
+        (results_df, output_directory)
     """
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
     print("="*80)
+    
+    # Create output directory with timestamp
+    if output_dir is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = f'results_{timestamp}'
+    
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"\nOutput directory: {output_dir}")
     
     # Default models
     if alpha_models is None:
@@ -244,12 +263,68 @@ def run_comparison(ticker: str = 'SPY',
         print(f"  HMM Filter Impact: {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
         print(f"  HMM Combine Impact: {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
     
-    # Save results
-    output_file = f'backtest_comparison_{ticker}_{start_date}_{end_date}.csv'
+    # Save results to output directory
+    output_file = os.path.join(output_dir, f'comparison_{ticker}_{start_date}_{end_date}.csv')
     results_df.to_csv(output_file, index=False)
     print(f"\n✓ Results saved to {output_file}")
     
-    return results_df
+    # Generate and save plots if requested
+    if save_plots:
+        print("\nGenerating plots...")
+        
+        # Initialize plotter with dummy data (we'll rerun backtests for plotting)
+        # Get top 3 strategies by Sharpe ratio
+        top_strategies = results_df.nlargest(3, 'Sharpe Ratio')
+        print(f"\nTop 3 strategies by Sharpe Ratio:")
+        for idx, row in top_strategies.iterrows():
+            print(f"  {row['Model']} - {row['Strategy']}: Sharpe={row['Sharpe Ratio']:.2f}, Return={row['Total Return (%)']:.2f}%")
+        
+        # Create comparison plot
+        fig = plt.figure(figsize=(15, 10))
+        
+        # Plot 1: Returns comparison
+        ax1 = plt.subplot(2, 2, 1)
+        model_returns = results_df.groupby('Model')['Total Return (%)'].mean().sort_values(ascending=False)
+        model_returns.plot(kind='bar', ax=ax1, color='steelblue')
+        ax1.set_title('Average Total Return by Model')
+        ax1.set_ylabel('Return (%)')
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Sharpe Ratio comparison
+        ax2 = plt.subplot(2, 2, 2)
+        model_sharpe = results_df.groupby('Model')['Sharpe Ratio'].mean().sort_values(ascending=False)
+        model_sharpe.plot(kind='bar', ax=ax2, color='coral')
+        ax2.set_title('Average Sharpe Ratio by Model')
+        ax2.set_ylabel('Sharpe Ratio')
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Max Drawdown comparison
+        ax3 = plt.subplot(2, 2, 3)
+        model_dd = results_df.groupby('Model')['Max Drawdown (%)'].mean().sort_values(ascending=True)
+        model_dd.plot(kind='bar', ax=ax3, color='indianred')
+        ax3.set_title('Average Max Drawdown by Model')
+        ax3.set_ylabel('Drawdown (%)')
+        ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Strategy comparison (scatter)
+        ax4 = plt.subplot(2, 2, 4)
+        for strategy in results_df['Strategy'].unique():
+            strategy_data = results_df[results_df['Strategy'] == strategy]
+            ax4.scatter(strategy_data['Max Drawdown (%)'], strategy_data['Total Return (%)'], 
+                       label=strategy, alpha=0.6, s=100)
+        ax4.set_xlabel('Max Drawdown (%)')
+        ax4.set_ylabel('Total Return (%)')
+        ax4.set_title('Risk-Return Profile by Strategy')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plot_file = os.path.join(output_dir, f'comparison_plots_{ticker}.png')
+        plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Plots saved to {plot_file}")
+    
+    return results_df, output_dir
 
 
 if __name__ == '__main__':
@@ -261,26 +336,30 @@ if __name__ == '__main__':
     end_date = sys.argv[3] if len(sys.argv) > 3 else '2024-12-31'
     show_plots = '--plot' in sys.argv or '-p' in sys.argv
     
+    # Check for output directory argument
+    output_dir = None
+    save_plots_flag = False
+    for i, arg in enumerate(sys.argv):
+        if arg == '--output-dir' and i + 1 < len(sys.argv):
+            output_dir = sys.argv[i + 1]
+        if arg == '--save-plots':
+            save_plots_flag = True
+    
     # Run comparison
-    results = run_comparison(
+    results, output_directory = run_comparison(
         ticker=ticker,
         start_date=start_date,
         end_date=end_date,
         short_window=10,
         long_window=30,
         rebalance_frequency=1,
-        transaction_cost=0.001
+        transaction_cost=0.001,
+        output_dir=output_dir,
+        save_plots=save_plots_flag or show_plots
     )
     
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")
+    print(f"Results saved to: {output_directory}")
     print("="*80)
-    
-    # Optional: Generate plots for best strategies
-    if show_plots:
-        print("\nGenerating plots for top strategies...")
-        # Get top 3 strategies by Sharpe ratio
-        top_strategies = results.nlargest(3, 'Sharpe Ratio')
-        print("\nPlotting top 3 strategies:")
-        print(top_strategies[['Model', 'Strategy', 'Sharpe Ratio', 'Total Return (%)']])
 

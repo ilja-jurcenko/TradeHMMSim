@@ -341,6 +341,12 @@ class HMMRegimeFilter:
         # Create features
         feats = self.make_features(close, vol_window=vol_window)
         
+        # Check if we have enough data
+        if len(feats) < train_window:
+            print(f"  Warning: Not enough data ({len(feats)} < {train_window}). Using all data for initial training.")
+            train_window = max(60, len(feats) // 2)  # Use at least 60 days or half the data
+            print(f"  Adjusted training window: {train_window}")
+        
         prob_list = []
         time_list = []
         
