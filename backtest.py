@@ -154,9 +154,11 @@ class BacktestEngine:
                 positions = alpha_signals_aligned * bear_filter
                 
             elif strategy_mode == 'alpha_hmm_override':
-                # Alpha + HMM override: HMM can override alpha signals
+                # Alpha + HMM override: HMM corrects alpha signals
+                # Take position when: (alpha=1 AND bear_prob<threshold) OR (alpha=0 AND bull_prob>threshold)
+                # This allows HMM to filter out wrong alpha signals and add positions when alpha misses opportunities
                 bear_filter = (bear_prob < bear_prob_threshold).astype(int)
-                bull_override = (bull_prob > bull_prob_threshold).astype(int)
+                bull_override = ((1 - alpha_signals_aligned) * (bull_prob > bull_prob_threshold)).astype(int)
                 positions = ((alpha_signals_aligned * bear_filter) | bull_override).astype(int)
             
             # Store regime info for later use
