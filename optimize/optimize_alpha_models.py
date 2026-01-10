@@ -46,22 +46,29 @@ class AlphaModelOptimizer:
         self.transaction_cost = transaction_cost
         
     def optimize_model(self, model_type: str, 
-                      short_windows: List[int],
-                      long_windows: List[int],
-                      optimize_for: str = 'total_return') -> Dict[str, Any]:
+                      short_window_min: int = 10,
+                      short_window_max: int = 50,
+                      long_window_min: int = 30,
+                      long_window_max: int = 200,
+                      optimize_for: str = 'profit_factor') -> Dict[str, Any]:
         """
-        Optimize parameters for a single model.
+        Optimize parameters for a single model using iterative search.
+        Only keeps improving parameter combinations.
         
         Parameters:
         -----------
         model_type : str
             Type of alpha model (e.g., 'SMA', 'EMA')
-        short_windows : List[int]
-            List of short window values to test
-        long_windows : List[int]
-            List of long window values to test
+        short_window_min : int
+            Minimum short window value
+        short_window_max : int
+            Maximum short window value
+        long_window_min : int
+            Minimum long window value
+        long_window_max : int
+            Maximum long window value
         optimize_for : str
-            Metric to optimize ('total_return' or 'profit_factor')
+            Metric to optimize (default: 'profit_factor')
             
         Returns:
         --------
@@ -71,31 +78,32 @@ class AlphaModelOptimizer:
         print(f"\n{'='*60}")
         print(f"Optimizing {model_type}")
         print(f"{'='*60}")
-        print(f"Short windows: {short_windows}")
-        print(f"Long windows: {long_windows}")
+        print(f"Short window range: [{short_window_min}, {short_window_max}]")
+        print(f"Long window range: [{long_window_min}, {long_window_max}]")
         print(f"Optimize for: {optimize_for}")
-        print(f"Total combinations: {len(short_windows) * len(long_windows)}")
         
         results = []
         best_score = -np.inf
         best_params = None
         best_metrics = None
         
-        # Grid search
-        total_combos = len(short_windows) * len(long_windows)
+        # Iterative search - only remember improving runs
         combo_count = 0
+        total_tested = 0
         
-        for short_window in short_windows:
-            for long_window in long_windows:
+        for short_window in range(short_window_min, short_window_max + 1):
+            for long_window in range(long_window_min, long_window_max + 1):
                 combo_count += 1
                 
                 # Skip invalid combinations
                 if short_window >= long_window:
                     continue
                 
-                # Progress indicator
-                if combo_count % 10 == 0 or combo_count == total_combos:
-                    print(f"  Progress: {combo_count}/{total_combos} ({combo_count/total_combos*100:.1f}%)")
+                total_tested += 1
+                
+                # Progress indicator every 20 combinations
+                if total_tested % 20 == 0:
+                    print(f"  Progress: Tested {total_tested} combinations, best {optimize_for}: {best_score:.4f}")
                 
                 try:
                     # Create alpha config
@@ -126,36 +134,43 @@ class AlphaModelOptimizer:
                     
                     metrics = result['metrics']
                     
-                    # Store result
-                    result_dict = {
-                        'short_window': short_window,
-                        'long_window': long_window,
-                        'total_return': metrics['total_return'],
-                        'annualized_return': metrics['annualized_return'],
-                        'sharpe_ratio': metrics['sharpe_ratio'],
-                        'sortino_ratio': metrics['sortino_ratio'],
-                        'max_drawdown': metrics['max_drawdown'],
-                        'profit_factor': metrics['profit_factor'],
-                        'win_rate': metrics['win_rate'],
-                        'volatility': metrics['volatility'],
-                        'calmar_ratio': metrics['calmar_ratio'],
-                        'num_trades': result['num_trades'],
-                        'time_in_market': result['time_in_market']
-                    }
-                    results.append(result_dict)
+                    # Get current score
+                    current_score = metrics[optimize_for]
                     
-                    # Check if best
-                    score = metrics[optimize_for]
-                    if score > best_score:
-                        best_score = score
+                    # Only remember if this improves upon previous best
+                    if current_score > best_score:
+                        best_score = current_score
                         best_params = (short_window, long_window)
+                        
+                        # Store result for improving runs only
+                        result_dict = {
+                            'short_window': short_window,
+                            'long_window': long_window,
+                            'total_return': metrics['total_return'],
+                            'annualized_return': metrics['annualized_return'],
+                            'sharpe_ratio': metrics['sharpe_ratio'],
+                            'sortino_ratio': metrics['sortino_ratio'],
+                            'max_drawdown': metrics['max_drawdown'],
+                            'profit_factor': metrics['profit_factor'],
+                            'win_rate': metrics['win_rate'],
+                            'volatility': metrics['volatility'],
+                            'calmar_ratio': metrics['calmar_ratio'],
+                            'num_trades': result['num_trades'],
+                            'time_in_market': result['time_in_market']
+                        }
+                        results.append(result_dict)
                         best_metrics = result_dict
+                        
+                        print(f"  ✓ New best: ({short_window}, {long_window}) -> {optimize_for}={current_score:.4f}")
                 
                 except Exception as e:
                     print(f"  Error with params ({short_window}, {long_window}): {str(e)}")
                     continue
         
         print(f"\nOptimization complete!")
+        print(f"Total combinations tested: {total_tested}")
+        print(f"Improving combinations found: {len(results)}")
+        
         if best_params is None:
             print(f"WARNING: No valid parameter combinations found for {model_type}")
             # Return empty result
@@ -164,7 +179,8 @@ class AlphaModelOptimizer:
                 'best_params': None,
                 'best_metrics': None,
                 'all_results': results,
-                'optimize_for': optimize_for
+                'optimize_for': optimize_for,
+                'total_tested': total_tested
             }
         
         print(f"Best parameters: short={best_params[0]}, long={best_params[1]}")
@@ -175,36 +191,37 @@ class AlphaModelOptimizer:
             'best_params': best_params,
             'best_metrics': best_metrics,
             'all_results': results,
-            'optimize_for': optimize_for
+            'optimize_for': optimize_for,
+            'total_tested': total_tested
         }
     
     def optimize_all_models(self, 
-                           short_windows: List[int] = None,
-                           long_windows: List[int] = None,
-                           optimize_for: str = 'total_return') -> Dict[str, Any]:
+                           short_window_min: int = 10,
+                           short_window_max: int = 50,
+                           long_window_min: int = 30,
+                           long_window_max: int = 200,
+                           optimize_for: str = 'profit_factor') -> Dict[str, Any]:
         """
-        Optimize all available alpha models.
+        Optimize all available alpha models using iterative search.
         
         Parameters:
         -----------
-        short_windows : List[int], optional
-            List of short window values to test
-        long_windows : List[int], optional
-            List of long window values to test
+        short_window_min : int
+            Minimum short window value
+        short_window_max : int
+            Maximum short window value
+        long_window_min : int
+            Minimum long window value
+        long_window_max : int
+            Maximum long window value
         optimize_for : str
-            Metric to optimize ('total_return' or 'profit_factor')
+            Metric to optimize (default: 'profit_factor')
             
         Returns:
         --------
         Dict[str, Any]
             Dictionary with results for each model
         """
-        if short_windows is None:
-            short_windows = [10, 20, 30, 50]
-        
-        if long_windows is None:
-            long_windows = [50, 100, 150, 200]
-        
         models = AlphaModelFactory.get_available_models()
         all_results = {}
         
@@ -213,14 +230,18 @@ class AlphaModelOptimizer:
         print(f"{'='*60}")
         print(f"Models to optimize: {', '.join(models)}")
         print(f"Optimization metric: {optimize_for}")
+        print(f"Short window range: [{short_window_min}, {short_window_max}]")
+        print(f"Long window range: [{long_window_min}, {long_window_max}]")
         print(f"Date range: {self.close.index[0].date()} to {self.close.index[-1].date()}")
         print(f"Number of periods: {len(self.close)}")
         
         for model_type in models:
             result = self.optimize_model(
                 model_type=model_type,
-                short_windows=short_windows,
-                long_windows=long_windows,
+                short_window_min=short_window_min,
+                short_window_max=short_window_max,
+                long_window_min=long_window_min,
+                long_window_max=long_window_max,
                 optimize_for=optimize_for
             )
             all_results[model_type] = result
@@ -305,21 +326,24 @@ def generate_optimization_report(results: Dict[str, Any],
     # Summary table
     report.append("## Optimization Results Summary")
     report.append("")
-    report.append("| Model | Short | Long | Total Return | Profit Factor | Sharpe | Max DD | Trades |")
-    report.append("|-------|-------|------|--------------|---------------|--------|--------|--------|")
+    report.append("| Model | Short | Long | Profit Factor | Total Return | Sharpe | Max DD | Trades | Tested |")
+    report.append("|-------|-------|------|---------------|--------------|--------|--------|--------|--------|")
     
     for model_type, result in sorted(results.items()):
         best = result['best_metrics']
+        total_tested = result.get('total_tested', 'N/A')
         if best is None:
-            report.append(f"| {model_type:<5} | N/A | N/A | N/A | N/A | N/A | N/A | N/A |")
+            report.append(f"| {model_type:<5} | N/A | N/A | N/A | N/A | N/A | N/A | N/A | {total_tested} |")
             continue
         report.append(
             f"| {model_type:<5} | {best['short_window']:>5} | {best['long_window']:>4} | "
-            f"{best['total_return']*100:>11.2f}% | {best['profit_factor']:>13.3f} | "
+            f"{best['profit_factor']:>13.3f} | {best['total_return']*100:>11.2f}% | "
             f"{best['sharpe_ratio']:>6.3f} | {best['max_drawdown']*100:>6.2f}% | "
-            f"{best['num_trades']:>6} |"
+            f"{best['num_trades']:>6} | {total_tested:>6} |"
         )
     
+    report.append("")
+    report.append("*Note: 'Tested' shows total parameter combinations tested for each model.*")
     report.append("")
     
     # Detailed results for each model
@@ -356,6 +380,8 @@ def generate_optimization_report(results: Dict[str, Any],
         report.append("**Optimal Parameters:**")
         report.append(f"- Short Window: {best['short_window']}")
         report.append(f"- Long Window: {best['long_window']}")
+        report.append(f"- Total Combinations Tested: {result.get('total_tested', 'N/A')}")
+        report.append(f"- Improving Combinations Found: {len(result['all_results'])}")
         report.append("")
         
         report.append("**Performance Metrics:**")
@@ -526,9 +552,17 @@ def main():
     parser.add_argument('ticker', type=str, help='Ticker symbol (e.g., SPY)')
     parser.add_argument('start_date', type=str, help='Start date (YYYY-MM-DD)')
     parser.add_argument('end_date', type=str, help='End date (YYYY-MM-DD)')
-    parser.add_argument('--optimize-for', type=str, default='total_return',
-                       choices=['total_return', 'profit_factor'],
-                       help='Metric to optimize (default: total_return)')
+    parser.add_argument('--optimize-for', type=str, default='profit_factor',
+                       choices=['total_return', 'profit_factor', 'sharpe_ratio'],
+                       help='Metric to optimize (default: profit_factor)')
+    parser.add_argument('--short-min', type=int, default=10,
+                       help='Minimum short window (default: 10)')
+    parser.add_argument('--short-max', type=int, default=50,
+                       help='Maximum short window (default: 50)')
+    parser.add_argument('--long-min', type=int, default=30,
+                       help='Minimum long window (default: 30)')
+    parser.add_argument('--long-max', type=int, default=200,
+                       help='Maximum long window (default: 200)')
     parser.add_argument('--output-dir', type=str, default='optimize',
                        help='Output directory (default: optimize)')
     
@@ -553,7 +587,13 @@ def main():
     
     # Run optimization
     optimizer = AlphaModelOptimizer(close, transaction_cost=0.001)
-    results = optimizer.optimize_all_models(optimize_for=args.optimize_for)
+    results = optimizer.optimize_all_models(
+        short_window_min=args.short_min,
+        short_window_max=args.short_max,
+        long_window_min=args.long_min,
+        long_window_max=args.long_max,
+        optimize_for=args.optimize_for
+    )
     
     # Generate report
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
