@@ -204,7 +204,7 @@ Based on HMM parameter search results:
 | Stable       | 252          | 63          | 91.83%       | 1.171        | Conservative (fewer switches) |
 | Accurate     | 756          | 21          | 68.68%       | 1.583        | Risk-adjusted (highest Sharpe) |
 
-See `hmm_analysis/HMM_CONFIGURATION_COMPARISON.md` for detailed analysis.
+See `../hmm_analysis/HMM_CONFIGURATION_COMPARISON.md` for detailed analysis.
 
 ## Troubleshooting
 
@@ -232,4 +232,4 @@ json.decoder.JSONDecodeError
 - `config_loader.py`: Configuration loading utility
 - `backtest.py`: Core backtesting engine
 - `run_comparison.py`: Comparison script with config support
-- `hmm_analysis/HMM_CONFIGURATION_COMPARISON.md`: Parameter search results
+- `../hmm_analysis/HMM_CONFIGURATION_COMPARISON.md`: Parameter search results

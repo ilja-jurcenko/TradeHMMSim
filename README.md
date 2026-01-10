@@ -15,7 +15,7 @@ This project provides a modular framework for:
 
 ```
 TradeHMMSim/
-├── AlphaModels/              # Trading signal generators
+├── alpha_models/             # Trading signal generators
 │   ├── __init__.py
 │   ├── base.py              # Base alpha model class
 │   ├── sma.py               # Simple Moving Average
@@ -26,25 +26,34 @@ TradeHMMSim/
 │   ├── tema.py              # Triple Exponential Moving Average
 │   └── zlema.py             # Zero-Lag Exponential Moving Average
 │
-├── SignalFilter/             # HMM regime detection
+├── signal_filter/            # HMM regime detection
 │   ├── __init__.py
 │   └── hmm_filter.py        # HMM regime filter implementation
 │
 ├── tests/                    # Unit tests
 │   ├── test_alpha_models/
-│   │   └── test_alpha_models.py
 │   ├── test_signal_filter/
-│   │   └── test_hmm_filter.py
-│   └── test_backtest.py
+│   ├── test_backtest.py
+│   └── test_config_loader.py
 │
 ├── examples/                 # Usage examples
-│   ├── example.py           # Simple usage examples
-│   ├── example_plotting.py  # Plotting examples
-│   └── example_config_testing.py  # Multi-config testing
+│   ├── example.py
+│   ├── example_plotting.py
+│   ├── example_config_usage.py
+│   └── example_config_testing.py
 │
 ├── hmm_analysis/             # HMM parameter analysis
 │   ├── analyze_hmm_thresholds.py
 │   └── HMM_CONFIGURATION_COMPARISON.md
+│
+├── docs/                     # Documentation
+│   ├── CHECKLIST.md
+│   ├── CONFIG_GUIDE.md      # Configuration system guide
+│   ├── CONFIG_QUICKREF.md   # Configuration quick reference
+│   ├── IMPLEMENTATION_SUMMARY.md
+│   ├── PLOTTING_GUIDE.md
+│   ├── PROJECT_SUMMARY.md
+│   └── QUICKSTART.md
 │
 ├── portfolio.py              # Portfolio management (data loading)
 ├── statistics.py             # Performance metrics calculation
@@ -55,7 +64,6 @@ TradeHMMSim/
 ├── config_default.json       # Default configuration
 ├── config_optimal.json       # Optimal HMM parameters (best returns)
 ├── config_accurate.json      # Accurate HMM parameters (highest Sharpe)
-├── CONFIG_GUIDE.md           # Configuration system guide
 ├── requirements.txt          # Python dependencies
 └── README.md                 # This file
 ```
@@ -135,7 +143,7 @@ python run_comparison.py --config config_default.json
 - Test multiple configurations systematically
 - Version control for parameter changes
 
-See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete configuration documentation.
+See **[CONFIG_GUIDE.md](docs/CONFIG_GUIDE.md)** for complete configuration documentation.
 
 ### Quick Start - Run Comparison
 

@@ -145,8 +145,8 @@ Based on HMM parameter search (2020-01-01 to 2025-12-31):
 ## Documentation
 
 - **Full Guide:** [CONFIG_GUIDE.md](CONFIG_GUIDE.md)
-- **HMM Analysis:** [hmm_analysis/HMM_CONFIGURATION_COMPARISON.md](hmm_analysis/HMM_CONFIGURATION_COMPARISON.md)
-- **Main README:** [README.md](README.md)
+- **HMM Analysis:** [hmm_analysis/HMM_CONFIGURATION_COMPARISON.md](../hmm_analysis/HMM_CONFIGURATION_COMPARISON.md)
+- **Main README:** [README.md](../README.md)
 
 ## Examples
 
