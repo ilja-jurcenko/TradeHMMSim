@@ -4,10 +4,11 @@ Backtest simulation engine with walk-forward testing and rebalancing.
 
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union, Any
 from alpha_models.base import AlphaModel
 from signal_filter.hmm_filter import HMMRegimeFilter
 from statistics import Statistics
+from alpha_model_factory import AlphaModelFactory
 
 
 class BacktestEngine:
@@ -16,7 +17,8 @@ class BacktestEngine:
     """
     
     def __init__(self, close: pd.Series, 
-                 alpha_model: AlphaModel,
+                 alpha_model: Optional[AlphaModel] = None,
+                 alpha_config: Optional[Dict[str, Any]] = None,
                  hmm_filter: Optional[HMMRegimeFilter] = None,
                  initial_capital: float = 100000.0):
         """
@@ -26,23 +28,133 @@ class BacktestEngine:
         -----------
         close : pd.Series
             Close price series
-        alpha_model : AlphaModel
-            Alpha model for signal generation
+        alpha_model : AlphaModel, optional
+            Alpha model instance for signal generation.
+            Provide either this OR alpha_config, not both.
+        alpha_config : Dict[str, Any], optional
+            Alpha model configuration dictionary with 'type' and 'parameters'.
+            Provide either this OR alpha_model, not both.
+            Example: {'type': 'SMA', 'parameters': {'short_window': 50, 'long_window': 200}}
         hmm_filter : HMMRegimeFilter, optional
             HMM filter for regime-based filtering
         initial_capital : float
             Initial capital
+            
+        Raises:
+        -------
+        ValueError
+            If both alpha_model and alpha_config are provided, or if neither is provided
         """
         self.close = close
-        self.alpha_model = alpha_model
         self.hmm_filter = hmm_filter
         self.initial_capital = initial_capital
+        
+        # Handle alpha model initialization
+        if alpha_model is not None and alpha_config is not None:
+            raise ValueError(
+                "Provide either alpha_model OR alpha_config, not both"
+            )
+        
+        if alpha_model is None and alpha_config is None:
+            raise ValueError(
+                "Must provide either alpha_model or alpha_config"
+            )
+        
+        if alpha_config is not None:
+            # Create alpha model from config
+            self.alpha_model = AlphaModelFactory.create_from_config(alpha_config)
+            self._alpha_config = alpha_config
+        else:
+            self.alpha_model = alpha_model
+            self._alpha_config = None
         
         # Results storage
         self.positions: Optional[pd.Series] = None
         self.returns: Optional[pd.Series] = None
         self.equity_curve: Optional[pd.Series] = None
         self.metrics: Optional[Dict] = None
+    
+    @staticmethod
+    def from_config(close: pd.Series, config: Dict[str, Any],
+                   hmm_filter: Optional[HMMRegimeFilter] = None) -> 'BacktestEngine':
+        """
+        Create BacktestEngine from full configuration dictionary.
+        
+        Parameters:
+        -----------
+        close : pd.Series
+            Close price series
+        config : Dict[str, Any]
+            Full configuration dictionary (as loaded from JSON)
+        hmm_filter : HMMRegimeFilter, optional
+            HMM filter for regime-based filtering
+            
+        Returns:
+        --------
+        BacktestEngine
+            Configured backtest engine instance
+            
+        Example:
+        --------
+        >>> from config_loader import ConfigLoader
+        >>> config = ConfigLoader.load_config('config_default.json')
+        >>> engine = BacktestEngine.from_config(close_prices, config, hmm_filter)
+        """
+        # Extract relevant sections
+        alpha_config = config.get('alpha_model')
+        if alpha_config is None:
+            raise KeyError("Configuration missing 'alpha_model' section")
+        
+        backtest_config = config.get('backtest', {})
+        initial_capital = backtest_config.get('initial_capital', 100000.0)
+        
+        return BacktestEngine(
+            close=close,
+            alpha_config=alpha_config,
+            hmm_filter=hmm_filter,
+            initial_capital=initial_capital
+        )
+    
+    @staticmethod
+    def from_alpha_config(close: pd.Series, alpha_config: Dict[str, Any],
+                         hmm_filter: Optional[HMMRegimeFilter] = None,
+                         initial_capital: float = 100000.0) -> 'BacktestEngine':
+        """
+        Create BacktestEngine from alpha model configuration only.
+        
+        Parameters:
+        -----------
+        close : pd.Series
+            Close price series
+        alpha_config : Dict[str, Any]
+            Alpha model configuration with 'type' and 'parameters'
+        hmm_filter : HMMRegimeFilter, optional
+            HMM filter for regime-based filtering
+        initial_capital : float
+            Initial capital
+            
+        Returns:
+        --------
+        BacktestEngine
+            Configured backtest engine instance
+        """
+        return BacktestEngine(
+            close=close,
+            alpha_config=alpha_config,
+            hmm_filter=hmm_filter,
+            initial_capital=initial_capital
+        )
+    
+    def get_alpha_config(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the alpha model configuration used (if created from config).
+        
+        Returns:
+        --------
+        Optional[Dict[str, Any]]
+            Alpha model configuration, or None if created from model instance
+        """
+        return self._alpha_config
         
     def run(self, 
             strategy_mode: str = 'alpha_only',

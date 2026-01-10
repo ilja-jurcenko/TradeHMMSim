@@ -105,15 +105,19 @@ class TestConfigLoader(unittest.TestCase):
         config = ConfigLoader.load_config('config_optimal.json')
         params = ConfigLoader.get_alpha_params(config)
         
-        # Verify required alpha parameters
-        self.assertIn('short_window', params)
-        self.assertIn('long_window', params)
+        # Verify returned format has type and parameters
+        self.assertIn('type', params)
+        self.assertIn('parameters', params)
+        
+        # Verify required parameters
+        self.assertIn('short_window', params['parameters'])
+        self.assertIn('long_window', params['parameters'])
         
         # Verify types and values
-        self.assertIsInstance(params['short_window'], int)
-        self.assertIsInstance(params['long_window'], int)
-        self.assertEqual(params['short_window'], 10)
-        self.assertEqual(params['long_window'], 30)
+        self.assertIsInstance(params['parameters']['short_window'], int)
+        self.assertIsInstance(params['parameters']['long_window'], int)
+        self.assertEqual(params['parameters']['short_window'], 10)
+        self.assertEqual(params['parameters']['long_window'], 30)
     
     def test_merge_configs(self):
         """Test merging configuration dictionaries."""
@@ -222,10 +226,10 @@ class TestConfigLoader(unittest.TestCase):
         self.assertGreater(config['backtest']['rebalance_frequency'], 0)
         
         # Test alpha model parameters
-        self.assertGreater(config['alpha_model']['short_window'], 0)
-        self.assertGreater(config['alpha_model']['long_window'], 0)
-        self.assertGreater(config['alpha_model']['long_window'], 
-                         config['alpha_model']['short_window'])
+        self.assertGreater(config['alpha_model']['parameters']['short_window'], 0)
+        self.assertGreater(config['alpha_model']['parameters']['long_window'], 0)
+        self.assertGreater(config['alpha_model']['parameters']['long_window'], 
+                         config['alpha_model']['parameters']['short_window'])
     
     def test_strategy_mode_values(self):
         """Test that strategy_mode values are valid."""
@@ -265,8 +269,9 @@ class TestConfigLoader(unittest.TestCase):
         
         # Test alpha params with defaults
         alpha_params = ConfigLoader.get_alpha_params(minimal_config)
-        self.assertEqual(alpha_params['short_window'], 10)
-        self.assertEqual(alpha_params['long_window'], 30)
+        self.assertEqual(alpha_params['type'], 'SMA')  # Default type
+        self.assertEqual(alpha_params['parameters']['short_window'], 10)
+        self.assertEqual(alpha_params['parameters']['long_window'], 30)
     
     def test_configuration_differences(self):
         """Test that different configurations have expected differences."""

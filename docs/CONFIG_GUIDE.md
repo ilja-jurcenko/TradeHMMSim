@@ -31,8 +31,11 @@ The backtesting framework now supports external JSON configuration files to expo
     "bull_prob_threshold": 0.65
   },
   "alpha_model": {
-    "short_window": 10,
-    "long_window": 30
+    "type": "SMA",
+    "parameters": {
+      "short_window": 10,
+      "long_window": 30
+    }
   },
   "data": {
     "ticker": "SPY",
@@ -71,8 +74,19 @@ The backtesting framework now supports external JSON configuration files to expo
 - **bull_prob_threshold**: Probability threshold for bull regime detection (0-1)
 
 ### Alpha Model Parameters
-- **short_window**: Short moving average window
-- **long_window**: Long moving average window
+- **type**: Alpha model type (SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA)
+- **parameters**: Dictionary containing model-specific parameters
+  - **short_window**: Short moving average window
+  - **long_window**: Long moving average window
+
+**Available Alpha Models:**
+- **SMA**: Simple Moving Average
+- **EMA**: Exponential Moving Average  
+- **WMA**: Weighted Moving Average
+- **HMA**: Hull Moving Average
+- **KAMA**: Kaufman's Adaptive Moving Average
+- **TEMA**: Triple Exponential Moving Average
+- **ZLEMA**: Zero-Lag Exponential Moving Average
 
 ### Data Parameters
 - **ticker**: Stock ticker symbol to backtest
@@ -183,6 +197,101 @@ for config_file in configs:
     print(f"\nTesting {config_file}...")
     results, output_dir = run_comparison(config_path=config_file)
     print(f"Results saved to: {output_dir}")
+```
+
+## Programmatic Model Creation
+
+### Using Alpha Model Factory
+
+The `AlphaModelFactory` allows creating alpha models from configuration:
+
+```python
+from alpha_model_factory import AlphaModelFactory
+
+# Create from config dictionary
+alpha_config = {
+    'type': 'EMA',
+    'parameters': {
+        'short_window': 12,
+        'long_window': 26
+    }
+}
+model = AlphaModelFactory.create_from_config(alpha_config)
+
+# Create from type and parameters
+model = AlphaModelFactory.create_from_type('SMA', 50, 200)
+
+# Get available models
+models = AlphaModelFactory.get_available_models()
+# Returns: ['SMA', 'EMA', 'WMA', 'HMA', 'KAMA', 'TEMA', 'ZLEMA']
+
+# Create all models with same parameters
+all_models = AlphaModelFactory.create_all_models(
+    short_window=10, 
+    long_window=30
+)
+```
+
+### Using BacktestEngine with Config
+
+```python
+from backtest import BacktestEngine
+from config_loader import ConfigLoader
+import yfinance as yf
+
+# Download price data
+data = yf.download('SPY', start='2020-01-01', end='2025-12-31')
+close = data['Close']
+
+# Method 1: From full config file
+config = ConfigLoader.load_config('config_optimal.json')
+engine = BacktestEngine.from_config(close, config)
+
+# Method 2: From alpha config only
+alpha_config = {
+    'type': 'KAMA',
+    'parameters': {
+        'short_window': 10,
+        'long_window': 30
+    }
+}
+engine = BacktestEngine.from_alpha_config(close, alpha_config)
+
+# Method 3: Direct initialization with alpha config
+engine = BacktestEngine(
+    close=close,
+    alpha_config=alpha_config,
+    initial_capital=100000.0
+)
+
+# Run backtest
+results = engine.run(strategy_mode='alpha_only')
+```
+
+### Testing Different Models
+
+```python
+from alpha_model_factory import AlphaModelFactory
+from backtest import BacktestEngine
+
+# Test all alpha models
+models = ['SMA', 'EMA', 'WMA', 'HMA', 'KAMA', 'TEMA', 'ZLEMA']
+results = {}
+
+for model_type in models:
+    alpha_config = {
+        'type': model_type,
+        'parameters': {
+            'short_window': 50,
+            'long_window': 200
+        }
+    }
+    
+    engine = BacktestEngine(close=close, alpha_config=alpha_config)
+    result = engine.run(strategy_mode='alpha_only')
+    results[model_type] = result['metrics']
+    
+    print(f"{model_type}: {result['metrics']['total_return']*100:.2f}%")
 ```
 
 ## Best Practices

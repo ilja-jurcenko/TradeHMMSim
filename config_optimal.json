@@ -17,8 +17,11 @@
     "bull_prob_threshold": 0.65
   },
   "alpha_model": {
-    "short_window": 10,
-    "long_window": 30
+    "type": "EMA",
+    "parameters": {
+      "short_window": 10,
+      "long_window": 30
+    }
   },
   "data": {
     "ticker": "SPY",

@@ -151,14 +151,23 @@ class ConfigLoader:
         Returns:
         --------
         Dict[str, Any]
-            Alpha model parameters
+            Alpha model parameters with 'type' and 'parameters' keys
         """
         alpha = config.get('alpha_model', {})
         
-        return {
-            'short_window': alpha.get('short_window', 10),
-            'long_window': alpha.get('long_window', 30)
-        }
+        # Support both old and new format for backward compatibility
+        if 'type' in alpha and 'parameters' in alpha:
+            # New format with type and parameters
+            return alpha
+        else:
+            # Old format with direct parameters (backward compatibility)
+            return {
+                'type': 'SMA',  # Default type
+                'parameters': {
+                    'short_window': alpha.get('short_window', 10),
+                    'long_window': alpha.get('long_window', 30)
+                }
+            }
     
     @staticmethod
     def print_config(config: Dict[str, Any]) -> None:
