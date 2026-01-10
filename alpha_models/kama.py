@@ -48,10 +48,19 @@ class KAMA(AlphaModel):
         # Calculate KAMA
         kama_vals = np.zeros(len(series))
         kama_vals[:window] = np.nan
-        kama_vals[window] = series.iloc[window]
         
+        # Handle edge case where window >= series length
+        if window >= len(series):
+            return pd.Series(kama_vals, index=series.index)
+        
+        # Initialize KAMA at window position
+        kama_vals[window] = float(series.iloc[window])
+        
+        # Calculate KAMA values
         for i in range(window + 1, len(series)):
-            kama_vals[i] = kama_vals[i-1] + sc.iloc[i] * (series.iloc[i] - kama_vals[i-1])
+            sc_val = float(sc.iloc[i])
+            price_val = float(series.iloc[i])
+            kama_vals[i] = kama_vals[i-1] + sc_val * (price_val - kama_vals[i-1])
         
         return pd.Series(kama_vals, index=series.index)
     

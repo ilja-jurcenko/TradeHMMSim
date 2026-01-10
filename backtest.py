@@ -338,6 +338,11 @@ class BacktestEngine:
         self.equity_curve = equity_curve
         self.metrics = metrics
         
+        # Extract final capital (handle both Series and DataFrame)
+        final_capital_value = equity_curve.iloc[-1]
+        if isinstance(final_capital_value, pd.Series):
+            final_capital_value = final_capital_value.iloc[0]
+        
         # Prepare results dictionary
         results = {
             'metrics': metrics,
@@ -350,7 +355,7 @@ class BacktestEngine:
             'strategy_mode': strategy_mode,
             'alpha_model': self.alpha_model.get_name(),
             'initial_capital': self.initial_capital,
-            'final_capital': float(equity_curve.iloc[-1]),
+            'final_capital': float(final_capital_value),
             'rebalance_frequency': rebalance_frequency
         }
         

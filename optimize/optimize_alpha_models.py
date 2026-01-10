@@ -539,6 +539,10 @@ def main():
     data = yf.download(args.ticker, start=args.start_date, end=args.end_date, progress=False)
     close = data['Close']
     
+    # Ensure close is a Series (yfinance may return DataFrame for single ticker)
+    if isinstance(close, pd.DataFrame):
+        close = close.squeeze()
+    
     print(f"Downloaded {len(close)} data points")
     
     # Calculate benchmark
