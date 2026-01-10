@@ -37,13 +37,25 @@ TradeHMMSim/
 │   │   └── test_hmm_filter.py
 │   └── test_backtest.py
 │
+├── examples/                 # Usage examples
+│   ├── example.py           # Simple usage examples
+│   ├── example_plotting.py  # Plotting examples
+│   └── example_config_testing.py  # Multi-config testing
+│
+├── hmm_analysis/             # HMM parameter analysis
+│   ├── analyze_hmm_thresholds.py
+│   └── HMM_CONFIGURATION_COMPARISON.md
+│
 ├── portfolio.py              # Portfolio management (data loading)
 ├── statistics.py             # Performance metrics calculation
 ├── backtest.py               # Backtest engine
 ├── plotter.py                # Visualization module
 ├── run_comparison.py         # Main comparison script
-├── example.py                # Simple usage examples
-├── example_plotting.py       # Plotting examples
+├── config_loader.py          # Configuration file loader
+├── config_default.json       # Default configuration
+├── config_optimal.json       # Optimal HMM parameters (best returns)
+├── config_accurate.json      # Accurate HMM parameters (highest Sharpe)
+├── CONFIG_GUIDE.md           # Configuration system guide
 ├── requirements.txt          # Python dependencies
 └── README.md                 # This file
 ```
@@ -101,6 +113,29 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+### Quick Start - Configuration Files (Recommended)
+
+Run backtests using JSON configuration files for full parameter control:
+
+```bash
+# Use optimal HMM configuration (best returns)
+python run_comparison.py --config config_optimal.json
+
+# Use accurate HMM configuration (highest Sharpe ratio)
+python run_comparison.py --config config_accurate.json
+
+# Use default/baseline configuration
+python run_comparison.py --config config_default.json
+```
+
+**Benefits:**
+- No code changes needed to test different parameters
+- Reproducible results - share config files
+- Test multiple configurations systematically
+- Version control for parameter changes
+
+See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete configuration documentation.
 
 ### Quick Start - Run Comparison
 

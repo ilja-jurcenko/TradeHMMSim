@@ -13,6 +13,7 @@ from signal_filter import HMMRegimeFilter
 from statistics import Statistics
 from plotter import BacktestPlotter
 from plotter import BacktestPlotter
+from config_loader import ConfigLoader
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for saving plots
 import matplotlib.pyplot as plt
@@ -27,7 +28,12 @@ def run_comparison(ticker: str = 'SPY',
                    rebalance_frequency: int = 1,
                    transaction_cost: float = 0.001,
                    output_dir: str = None,
-                   save_plots: bool = False):
+                   save_plots: bool = False,
+                   config_path: str = None,
+                   train_window: int = 504,
+                   refit_every: int = 21,
+                   bear_prob_threshold: float = 0.65,
+                   bull_prob_threshold: float = 0.65):
     """
     Run comprehensive comparison of AlphaModels with and without HMM filtering.
     
@@ -53,12 +59,45 @@ def run_comparison(ticker: str = 'SPY',
         Directory to save results. If None, creates timestamped directory
     save_plots : bool
         Whether to generate and save plots
+    config_path : str, optional
+        Path to configuration JSON file. If provided, overrides other parameters.
+    train_window : int
+        Training window for HMM walk-forward
+    refit_every : int
+        Refit HMM every N periods
+    bear_prob_threshold : float
+        Bear regime probability threshold
+    bull_prob_threshold : float
+        Bull regime probability threshold
         
     Returns:
     --------
     tuple
         (results_df, output_directory)
     """
+    # Load configuration from file if provided
+    if config_path is not None:
+        print(f"\nLoading configuration from: {config_path}")
+        config = ConfigLoader.load_config(config_path)
+        ConfigLoader.print_config(config)
+        
+        # Override parameters with config values
+        ticker = config.get('data', {}).get('ticker', ticker)
+        start_date = config.get('data', {}).get('start_date', start_date)
+        end_date = config.get('data', {}).get('end_date', end_date)
+        short_window = config.get('alpha_model', {}).get('short_window', short_window)
+        long_window = config.get('alpha_model', {}).get('long_window', long_window)
+        rebalance_frequency = config.get('backtest', {}).get('rebalance_frequency', rebalance_frequency)
+        transaction_cost = config.get('backtest', {}).get('transaction_cost', transaction_cost)
+        save_plots = config.get('output', {}).get('save_plots', save_plots)
+        output_dir_cfg = config.get('output', {}).get('output_dir')
+        if output_dir_cfg is not None:
+            output_dir = output_dir_cfg
+        train_window = config.get('hmm', {}).get('train_window', train_window)
+        refit_every = config.get('hmm', {}).get('refit_every', refit_every)
+        bear_prob_threshold = config.get('hmm', {}).get('bear_prob_threshold', bear_prob_threshold)
+        bull_prob_threshold = config.get('hmm', {}).get('bull_prob_threshold', bull_prob_threshold)
+    
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
     print("="*80)
@@ -144,8 +183,10 @@ def run_comparison(ticker: str = 'SPY',
         results_hmm = engine_hmm.run(
             strategy_mode='hmm_only',
             walk_forward=True,
-            train_window=504,
-            refit_every=21,
+            train_window=train_window,
+            refit_every=refit_every,
+            bear_prob_threshold=bear_prob_threshold,
+            bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
             transaction_cost=transaction_cost
         )
@@ -177,8 +218,10 @@ def run_comparison(ticker: str = 'SPY',
         results_filter = engine_filter.run(
             strategy_mode='alpha_hmm_filter',
             walk_forward=True,
-            train_window=504,
-            refit_every=21,
+            train_window=train_window,
+            refit_every=refit_every,
+            bear_prob_threshold=bear_prob_threshold,
+            bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
             transaction_cost=transaction_cost
         )
@@ -210,8 +253,10 @@ def run_comparison(ticker: str = 'SPY',
         results_combine = engine_combine.run(
             strategy_mode='alpha_hmm_combine',
             walk_forward=True,
-            train_window=504,
-            refit_every=21,
+            train_window=train_window,
+            refit_every=refit_every,
+            bear_prob_threshold=bear_prob_threshold,
+            bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
             transaction_cost=transaction_cost
         )
@@ -438,10 +483,17 @@ def run_comparison(ticker: str = 'SPY',
 if __name__ == '__main__':
     import sys
     
-    # Parse command line arguments
-    ticker = sys.argv[1] if len(sys.argv) > 1 else 'SPY'
-    start_date = sys.argv[2] if len(sys.argv) > 2 else '2018-01-01'
-    end_date = sys.argv[3] if len(sys.argv) > 3 else '2024-12-31'
+    # Check for config file argument first
+    config_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == '--config' and i + 1 < len(sys.argv):
+            config_path = sys.argv[i + 1]
+            break
+    
+    # Parse command line arguments (config overrides these)
+    ticker = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'SPY'
+    start_date = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else '2018-01-01'
+    end_date = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith('--') else '2024-12-31'
     show_plots = '--plot' in sys.argv or '-p' in sys.argv
     
     # Check for output directory argument
@@ -463,7 +515,8 @@ if __name__ == '__main__':
         rebalance_frequency=1,
         transaction_cost=0.001,
         output_dir=output_dir,
-        save_plots=save_plots_flag or show_plots
+        save_plots=save_plots_flag or show_plots,
+        config_path=config_path
     )
     
     print("\n" + "="*80)

@@ -1,0 +1,32 @@
+{
+  "backtest": {
+    "initial_capital": 100000.0,
+    "transaction_cost": 0.001,
+    "rebalance_frequency": 1
+  },
+  "strategy": {
+    "strategy_mode": "alpha_hmm_combine",
+    "walk_forward": true
+  },
+  "hmm": {
+    "n_states": 3,
+    "random_state": 42,
+    "train_window": 252,
+    "refit_every": 42,
+    "bear_prob_threshold": 0.65,
+    "bull_prob_threshold": 0.65
+  },
+  "alpha_model": {
+    "short_window": 10,
+    "long_window": 30
+  },
+  "data": {
+    "ticker": "SPY",
+    "start_date": "2020-01-01",
+    "end_date": "2025-12-31"
+  },
+  "output": {
+    "save_plots": true,
+    "output_dir": null
+  }
+}
