@@ -143,7 +143,7 @@ import os
 os.makedirs('hmm_analysis', exist_ok=True)
 
 # Create figure with subplots
-fig, axes = plt.subplots(4, 1, figsize=(16, 12), sharex=True)
+fig, axes = plt.subplots(5, 1, figsize=(16, 14), sharex=True)
 fig.suptitle('HMM Regime Analysis with Trading Signals', fontsize=16, fontweight='bold')
 
 # Align data
@@ -279,7 +279,145 @@ ax4.fill_between(plot_idx, close_plot.min() * 0.98, close_plot.max() * 1.02,
 
 ax4.legend(loc='upper left', fontsize=9)
 ax4.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
-ax4.set_xlabel('Date', fontsize=10, fontweight='bold')
+
+# Plot 5: Price colored by regime when in position - showing entry source
+ax5 = axes[4]
+ax5.set_ylabel('Price ($)', fontsize=10, fontweight='bold')
+ax5.set_title('Position Entry/Exit Analysis by Model Source and Regime', fontsize=11, fontweight='bold')
+
+# Plot segments colored by regime, only when in position
+for i in range(len(plot_idx) - 1):
+    if combined_positions.iloc[i]:
+        current_regime = regime_plot.iloc[i]
+        
+        # Determine color based on regime
+        if current_regime == bear_regime:
+            color = 'red'
+        elif current_regime == bull_regime:
+            color = 'green'
+        elif current_regime == neutral_regime:
+            color = 'gray'
+        else:
+            color = 'black'
+        
+        ax5.plot([plot_idx[i], plot_idx[i+1]], 
+                [close_plot.iloc[i], close_plot.iloc[i+1]], 
+                color=color, linewidth=2, alpha=0.8)
+    else:
+        # Out of position - plot in light gray
+        ax5.plot([plot_idx[i], plot_idx[i+1]], 
+                [close_plot.iloc[i], close_plot.iloc[i+1]], 
+                color='lightgray', linewidth=1, alpha=0.5)
+
+# Classify entry points by source (Alpha vs Contrarian HMM)
+alpha_entry_dates = []
+contrarian_entry_dates_with_regime = []
+
+for date in combined_entries:
+    if date in plot_idx:
+        idx_pos = plot_idx.get_loc(date)
+        current_regime = regime_plot.iloc[idx_pos]
+        
+        # Determine if this was an alpha entry or contrarian entry
+        is_contrarian = date in contrarian_entry_dates
+        
+        if is_contrarian:
+            contrarian_entry_dates_with_regime.append((date, current_regime))
+        else:
+            alpha_entry_dates.append((date, current_regime))
+
+# Plot Alpha entries with regime-specific colors and triangle markers
+for date, regime_id in alpha_entry_dates:
+    if regime_id == bear_regime:
+        marker_color = 'red'
+        edge_color = 'darkred'
+    elif regime_id == bull_regime:
+        marker_color = 'green'
+        edge_color = 'darkgreen'
+    elif regime_id == neutral_regime:
+        marker_color = 'gray'
+        edge_color = 'darkgray'
+    else:
+        marker_color = 'black'
+        edge_color = 'black'
+    
+    ax5.scatter(date, close.loc[date], color=marker_color, marker='^', s=100, 
+               zorder=5, edgecolors=edge_color, linewidths=1.5, alpha=0.9)
+
+# Plot Contrarian HMM entries with regime-specific colors and star markers
+for date, regime_id in contrarian_entry_dates_with_regime:
+    if regime_id == bear_regime:
+        marker_color = 'red'
+        edge_color = 'darkred'
+    elif regime_id == bull_regime:
+        marker_color = 'green'
+        edge_color = 'darkgreen'
+    elif regime_id == neutral_regime:
+        marker_color = 'gray'
+        edge_color = 'darkgray'
+    else:
+        marker_color = 'black'
+        edge_color = 'black'
+    
+    ax5.scatter(date, close.loc[date], color=marker_color, marker='*', s=180, 
+               zorder=6, edgecolors=edge_color, linewidths=2, alpha=0.9)
+
+# Plot exit points
+if len(combined_exits) > 0:
+    ax5.scatter(combined_exits, close.loc[combined_exits], color='black', marker='v', s=100, 
+               label=f'Exit ({len(combined_exits)})', zorder=5, edgecolors='red', linewidths=1.5, alpha=0.8)
+
+# Create custom legend
+from matplotlib.lines import Line2D
+legend_elements = [
+    Line2D([0], [0], color='green', lw=2, label='In Position - Bull'),
+    Line2D([0], [0], color='gray', lw=2, label='In Position - Neutral'),
+    Line2D([0], [0], color='red', lw=2, label='In Position - Bear'),
+    Line2D([0], [0], color='lightgray', lw=1, alpha=0.5, label='Out of Position'),
+    Line2D([0], [0], marker='^', color='w', markerfacecolor='gray', 
+           markeredgecolor='black', markersize=8, label='Alpha Entry △ (regime colored)', linewidth=0),
+    Line2D([0], [0], marker='*', color='w', markerfacecolor='gray', 
+           markeredgecolor='black', markersize=10, label='Contrarian Entry ★ (regime colored)', linewidth=0),
+    Line2D([0], [0], marker='v', color='w', markerfacecolor='black', 
+           markeredgecolor='red', markersize=8, label='Exit ▽', linewidth=0),
+]
+ax5.legend(handles=legend_elements, loc='lower right', fontsize=7.5, ncol=2, framealpha=0.9)
+ax5.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+ax5.set_xlabel('Date', fontsize=10, fontweight='bold')
+
+# Count entries by regime and source
+alpha_by_regime = {'Bull': 0, 'Neutral': 0, 'Bear': 0}
+contrarian_by_regime = {'Bull': 0, 'Neutral': 0, 'Bear': 0}
+
+for date, regime_id in alpha_entry_dates:
+    if regime_id == bull_regime:
+        alpha_by_regime['Bull'] += 1
+    elif regime_id == neutral_regime:
+        alpha_by_regime['Neutral'] += 1
+    elif regime_id == bear_regime:
+        alpha_by_regime['Bear'] += 1
+
+for date, regime_id in contrarian_entry_dates_with_regime:
+    if regime_id == bull_regime:
+        contrarian_by_regime['Bull'] += 1
+    elif regime_id == neutral_regime:
+        contrarian_by_regime['Neutral'] += 1
+    elif regime_id == bear_regime:
+        contrarian_by_regime['Bear'] += 1
+
+# Add text annotation with detailed breakdown
+total_alpha = sum(alpha_by_regime.values())
+total_contrarian = sum(contrarian_by_regime.values())
+total_entries = total_alpha + total_contrarian
+
+if total_entries > 0:
+    text_str = f"Entry Analysis (Total: {total_entries})\n"
+    text_str += f"Alpha: {total_alpha} | Bull {alpha_by_regime['Bull']}, Neutral {alpha_by_regime['Neutral']}, Bear {alpha_by_regime['Bear']}\n"
+    text_str += f"Contrarian: {total_contrarian} | Bull {contrarian_by_regime['Bull']}, Neutral {contrarian_by_regime['Neutral']}, Bear {contrarian_by_regime['Bear']}"
+    ax5.text(0.02, 0.98, text_str, transform=ax5.transAxes, 
+            fontsize=8, verticalalignment='top', 
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6),
+            family='monospace')
 
 # Format x-axis
 for ax in axes:
