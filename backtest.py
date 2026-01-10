@@ -325,8 +325,8 @@ class BacktestEngine:
         # Calculate equity curve
         equity_curve = self.initial_capital * (1 + strategy_returns).cumprod()
         
-        # Calculate metrics
-        metrics = Statistics.calculate_all_metrics(strategy_returns)
+        # Calculate metrics (convert to numpy array)
+        metrics = Statistics.calculate_all_metrics(strategy_returns.values)
         
         # Calculate additional statistics
         num_trades = int(np.sum(np.abs(positions.diff().fillna(0))) / 2)
