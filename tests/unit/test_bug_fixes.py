@@ -120,12 +120,18 @@ class TestAlphaHMMCombineLogic(unittest.TestCase):
         np.random.seed(42)
         dates = pd.date_range('2020-01-01', periods=200, freq='D')
         self.prices = pd.Series(np.cumsum(np.random.randn(200) * 0.5) + 100, index=dates)
-        self.alpha_model = SMA(short_window=10, long_window=30)
+        self.alpha_config = {
+            'type': 'SMA',
+            'parameters': {
+                'short_window': 10,
+                'long_window': 30
+            }
+        }
         self.hmm_filter = HMMRegimeFilter(n_states=2, random_state=42)
     
     def test_combine_strategy_uses_or_logic(self):
         """Test that alpha_hmm_combine uses OR logic (not override)."""
-        engine = BacktestEngine(self.prices, self.alpha_model, self.hmm_filter)
+        engine = BacktestEngine(self.prices, alpha_config=self.alpha_config, hmm_filter=self.hmm_filter)
         
         results = engine.run(
             strategy_mode='alpha_hmm_combine',
@@ -142,8 +148,11 @@ class TestAlphaHMMCombineLogic(unittest.TestCase):
         # 2. HMM indicates bull regime
         # This means it should generally have more time in market than filter strategy
         
-        alpha_only = BacktestEngine(self.prices, self.alpha_model).run(strategy_mode='alpha_only')
-        hmm_only = BacktestEngine(self.prices, self.alpha_model, self.hmm_filter).run(
+        alpha_only_engine = BacktestEngine(self.prices, alpha_config=self.alpha_config)
+        alpha_only = alpha_only_engine.run(strategy_mode='alpha_only')
+        
+        hmm_only_engine = BacktestEngine(self.prices, alpha_config=self.alpha_config, hmm_filter=self.hmm_filter)
+        hmm_only = hmm_only_engine.run(
             strategy_mode='hmm_only',
             walk_forward=True,
             train_window=60,
@@ -169,10 +178,16 @@ class TestHMMInsufficientDataHandling(unittest.TestCase):
         dates = pd.date_range('2023-01-01', periods=100, freq='D')
         prices = pd.Series(np.cumsum(np.random.randn(100) * 0.5) + 100, index=dates)
         
-        alpha_model = SMA(short_window=5, long_window=10)
+        alpha_config = {
+            'type': 'SMA',
+            'parameters': {
+                'short_window': 5,
+                'long_window': 10
+            }
+        }
         hmm_filter = HMMRegimeFilter(n_states=2, random_state=42)
         
-        engine = BacktestEngine(prices, alpha_model, hmm_filter)
+        engine = BacktestEngine(prices, alpha_config=alpha_config, hmm_filter=hmm_filter)
         
         # Should not raise IndexError
         try:
