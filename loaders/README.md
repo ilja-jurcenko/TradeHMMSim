@@ -6,6 +6,13 @@ This module provides a flexible, pluggable architecture for loading market data 
 
 The Portfolio class has been refactored to separate data loading concerns from portfolio management. This allows you to easily switch between different data providers (Yahoo Finance, CSV files, databases, APIs, etc.) without changing your core logic.
 
+### Available Loaders
+
+1. **YFinanceLoader** - Direct downloads from Yahoo Finance
+2. **CachedYFinanceLoader** - Yahoo Finance with intelligent local caching
+3. **CSVLoader** - Load from local CSV files  
+4. **Custom Loaders** - Easy to implement for your own data sources
+
 ## Architecture
 
 ```
@@ -66,6 +73,33 @@ loader = CSVLoader(data_dir='./data')
 portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31', loader=loader)
 portfolio.load_data()
 ```
+
+### Using Cached YFinance Loader (Recommended for Development)
+
+Best for development and backtesting - downloads once, caches locally:
+
+```python
+from portfolio import Portfolio
+from loaders import CachedYFinanceLoader
+
+# Creates ./cache/ directory with CSV files
+loader = CachedYFinanceLoader(cache_dir='./cache')
+portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31', loader=loader)
+portfolio.load_data()  # First time: downloads and caches
+
+# Second run: instant, uses cache
+portfolio2 = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31', loader=loader)
+portfolio2.load_data()  # Lightning fast! No network call
+```
+
+**Key Features:**
+- Automatically caches downloaded data to CSV
+- Detects missing data ranges and downloads only what's needed
+- Intelligently appends new data to existing cache
+- 2-10x faster for repeated access
+- Perfect for iterative development
+
+See [Cached Loader Guide](../docs/CACHED_LOADER_GUIDE.md) for detailed documentation.
 
 ### Using Loaders Directly
 
