@@ -3,17 +3,18 @@ Portfolio management module for loading and managing asset data.
 """
 
 import pandas as pd
-import yfinance as yf
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from datetime import datetime
+from loaders import BaseDataLoader, YFinanceLoader
 
 
 class Portfolio:
     """
-    Portfolio class for managing assets and loading data from Yahoo Finance.
+    Portfolio class for managing assets with pluggable data loaders.
     """
     
-    def __init__(self, tickers: List[str], start_date: str, end_date: str):
+    def __init__(self, tickers: List[str], start_date: str, end_date: str, 
+                 loader: Optional[BaseDataLoader] = None):
         """
         Initialize Portfolio.
         
@@ -25,17 +26,20 @@ class Portfolio:
             Start date in 'YYYY-MM-DD' format
         end_date : str
             End date in 'YYYY-MM-DD' format
+        loader : BaseDataLoader, optional
+            Data loader instance. If None, uses YFinanceLoader by default.
         """
         self.tickers = tickers
         self.start_date = start_date
         self.end_date = end_date
+        self.loader = loader if loader is not None else YFinanceLoader()
         self.data: Dict[str, pd.DataFrame] = {}
         self.close_prices: Optional[pd.DataFrame] = None
         self.returns: Optional[pd.DataFrame] = None
         
     def load_data(self, progress: bool = False) -> None:
         """
-        Load data from Yahoo Finance for all tickers.
+        Load data using the configured data loader.
         
         Parameters:
         -----------
@@ -45,15 +49,12 @@ class Portfolio:
         print(f"Loading data for {len(self.tickers)} ticker(s) from {self.start_date} to {self.end_date}...")
         
         for ticker in self.tickers:
-            try:
-                data = yf.download(ticker, start=self.start_date, end=self.end_date, progress=progress)
-                if len(data) > 0:
-                    self.data[ticker] = data
-                    print(f"  ✓ {ticker}: {len(data)} rows")
-                else:
-                    print(f"  ✗ {ticker}: No data available")
-            except Exception as e:
-                print(f"  ✗ {ticker}: Error - {e}")
+            data = self.loader.load_ticker(ticker, self.start_date, self.end_date, progress)
+            if data is not None:
+                self.data[ticker] = data
+                print(f"  ✓ {ticker}: {len(data)} rows")
+            else:
+                print(f"  ✗ {ticker}: No data available")
         
         self._prepare_close_prices()
         self._calculate_returns()
@@ -91,7 +92,7 @@ class Portfolio:
         if self.close_prices is not None:
             self.returns = self.close_prices.pct_change()
             
-    def get_close_prices(self, ticker: Optional[str] = None) -> pd.Series or pd.DataFrame:
+    def get_close_prices(self, ticker: Optional[str] = None) -> Union[pd.Series, pd.DataFrame]:
         """
         Get close prices for a specific ticker or all tickers.
         
@@ -117,7 +118,7 @@ class Portfolio:
         else:
             return self.close_prices
     
-    def get_returns(self, ticker: Optional[str] = None) -> pd.Series or pd.DataFrame:
+    def get_returns(self, ticker: Optional[str] = None) -> Union[pd.Series, pd.DataFrame]:
         """
         Get returns for a specific ticker or all tickers.
         
@@ -167,17 +168,14 @@ class Portfolio:
         """
         if ticker not in self.tickers:
             self.tickers.append(ticker)
-            try:
-                data = yf.download(ticker, start=self.start_date, end=self.end_date, progress=False)
-                if len(data) > 0:
-                    self.data[ticker] = data
-                    self._prepare_close_prices()
-                    self._calculate_returns()
-                    print(f"Added {ticker}: {len(data)} rows")
-                else:
-                    print(f"No data available for {ticker}")
-            except Exception as e:
-                print(f"Error adding {ticker}: {e}")
+            data = self.loader.load_ticker(ticker, self.start_date, self.end_date, progress=False)
+            if data is not None:
+                self.data[ticker] = data
+                self._prepare_close_prices()
+                self._calculate_returns()
+                print(f"Added {ticker}: {len(data)} rows")
+            else:
+                print(f"No data available for {ticker}")
     
     def remove_ticker(self, ticker: str) -> None:
         """

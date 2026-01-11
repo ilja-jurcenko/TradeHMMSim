@@ -570,7 +570,13 @@ def main():
     
     # Download data
     print(f"\nDownloading {args.ticker} data from {args.start_date} to {args.end_date}...")
-    data = yf.download(args.ticker, start=args.start_date, end=args.end_date, progress=False)
+    loader = YFinanceLoader()
+    data = loader.load_ticker(args.ticker, start=args.start_date, end=args.end_date, progress=False)
+    
+    if data is None:
+        print(f"Error: Could not load data for {args.ticker}")
+        return
+    
     close = data['Close']
     
     # Ensure close is a Series (yfinance may return DataFrame for single ticker)

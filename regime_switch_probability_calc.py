@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from sklearn.discriminant_analysis import StandardScaler
-import yfinance as yf
+from loaders import YFinanceLoader
 from hmmlearn.hmm import GaussianHMM
 
 # ----------------------------
@@ -216,7 +216,12 @@ def run_hmm_regime_detection(
 def download_spy_data(start_date='2005-01-01', end_date='2024-12-31'):
     """Download SPY data from Yahoo Finance."""
     print(f"Downloading SPY data from {start_date} to {end_date}...")
-    spy = yf.download('SPY', start=start_date, end=end_date, progress=False)
+    loader = YFinanceLoader()
+    spy = loader.load_ticker('SPY', start=start_date, end=end_date, progress=False)
+    
+    if spy is None:
+        raise ValueError("Failed to download SPY data")
+    
     print(f"Downloaded {len(spy)} rows of data")
     return spy
 
