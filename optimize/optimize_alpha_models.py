@@ -569,9 +569,9 @@ def main():
     args = parser.parse_args()
     
     # Download data
-    print(f"\nDownloading {args.ticker} data from {args.start_date} to {args.end_date}...")
-    loader = YFinanceLoader()
-    data = loader.load_ticker(args.ticker, start=args.start_date, end=args.end_date, progress=False)
+    print(f"\nLoading {args.ticker} data from {args.start_date} to {args.end_date}...")
+    loader = CachedYFinanceLoader(cache_dir='./data')
+    data = loader.load_ticker(args.ticker, args.start_date, args.end_date, progress=False)
     
     if data is None:
         print(f"Error: Could not load data for {args.ticker}")

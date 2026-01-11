@@ -62,3 +62,4 @@ Thumbs.db
 sma_optimization_results*.csv
 backtest_comparison_*.csv
 results/
+data/  # Cached data from CachedYFinanceLoader

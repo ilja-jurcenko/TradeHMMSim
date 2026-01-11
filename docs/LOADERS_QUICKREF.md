@@ -2,12 +2,24 @@
 
 ## Quick Start
 
-### Default Usage (No Changes Needed)
+### Default Usage (Cached - Recommended)
 ```python
 from portfolio import Portfolio
 
+# Default: Uses CachedYFinanceLoader with ./data cache
 portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31')
-portfolio.load_data()
+portfolio.load_data()  # First time: downloads and caches
+# Second time: instant cache hit!
+```
+
+### Without Caching (Always Fresh)
+```python
+from portfolio import Portfolio
+from loaders import YFinanceLoader
+
+loader = YFinanceLoader()  # No caching
+portfolio = Portfolio(['SPY'], '2020-01-01', '2024-12-31', loader=loader)
+portfolio.load_data()  # Always downloads fresh
 ```
 
 ### Using CSV Files
@@ -72,7 +84,8 @@ portfolio.load_data()  # Fast, no network calls!
 
 | Loader | Purpose | Usage |
 |--------|---------|-------|
-| `YFinanceLoader` | Yahoo Finance (default) | `loader = YFinanceLoader()` |
+| `CachedYFinanceLoader` | Yahoo Finance with caching (default) | `loader = CachedYFinanceLoader(cache_dir='./data')` |
+| `YFinanceLoader` | Yahoo Finance without caching | `loader = YFinanceLoader()` |
 | `CSVLoader` | Local CSV files | `loader = CSVLoader(data_dir='./data')` |
 | `BaseDataLoader` | Custom loader base class | Inherit and implement |
 
@@ -128,8 +141,10 @@ class CachedLoader(BaseDataLoader):
 
 ## Migration Checklist
 
-- [ ] No changes needed for existing code (uses YFinanceLoader by default)
-- [ ] To use CSV: Create `loaders` directory with CSV files
+- [x] Existing code automatically uses CachedYFinanceLoader (faster!)
+- [x] Data cached to ./data/ directory
+- [ ] To use CSV: Create CSV files in ./data/ directory  
+- [ ] To disable caching: Explicitly use YFinanceLoader
 - [ ] To create custom loader: Inherit from `BaseDataLoader`
 - [ ] Run tests to verify: `python3 tests/test_loaders.py`
 

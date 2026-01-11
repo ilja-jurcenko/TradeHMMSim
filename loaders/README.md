@@ -8,8 +8,8 @@ The Portfolio class has been refactored to separate data loading concerns from p
 
 ### Available Loaders
 
-1. **YFinanceLoader** - Direct downloads from Yahoo Finance
-2. **CachedYFinanceLoader** - Yahoo Finance with intelligent local caching
+1. **CachedYFinanceLoader** - Yahoo Finance with intelligent local caching (default, recommended)
+2. **YFinanceLoader** - Direct downloads from Yahoo Finance (no caching)
 3. **CSVLoader** - Load from local CSV files  
 4. **Custom Loaders** - Easy to implement for your own data sources
 
@@ -26,20 +26,21 @@ loaders/
 ### Key Components
 
 1. **BaseDataLoader**: Abstract base class defining the loader interface
-2. **YFinanceLoader**: Loads data from Yahoo Finance (default)
-3. **CSVLoader**: Loads data from local CSV files
-4. **Custom Loaders**: Easy to implement for your own data sources
+2. **CachedYFinanceLoader**: Loads data from Yahoo Finance with caching (default)
+3. **YFinanceLoader**: Loads data from Yahoo Finance without caching
+4. **CSVLoader**: Loads data from local CSV files
+5. **Custom Loaders**: Easy to implement for your own data sources
 
 ## Usage
 
 ### Basic Usage with Default Loader
 
-The Portfolio class uses `YFinanceLoader` by default:
+The Portfolio class uses `CachedYFinanceLoader` by default (recommended for faster access):
 
 ```python
 from portfolio import Portfolio
 
-# Uses YFinanceLoader automatically
+# Uses CachedYFinanceLoader automatically (caches to ./data/)
 portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31')
 portfolio.load_data()
 
@@ -52,9 +53,22 @@ You can explicitly provide a loader:
 
 ```python
 from portfolio import Portfolio
+from loaders import CachedYFinanceLoader
+
+loader = CachedYFinanceLoader(cache_dir='./my_cache')
+portfolio = Portfolio(['SPY'], '2020-01-01', '2024-12-31', loader=loader)
+portfolio.load_data()
+```
+
+### Using Direct Downloads (No Caching)
+
+For always-fresh data without caching:
+
+```python
+from portfolio import Portfolio
 from loaders import YFinanceLoader
 
-loader = YFinanceLoader()
+loader = YFinanceLoader()  # No caching
 portfolio = Portfolio(['SPY'], '2020-01-01', '2024-12-31', loader=loader)
 portfolio.load_data()
 ```
@@ -74,16 +88,20 @@ portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31', loader=loader)
 portfolio.load_data()
 ```
 
-### Using Cached YFinance Loader (Recommended for Development)
+### Using Cached YFinance Loader (Default)
 
-Best for development and backtesting - downloads once, caches locally:
+This is now the default for all Portfolio instances:
 
 ```python
 from portfolio import Portfolio
 from loaders import CachedYFinanceLoader
 
-# Creates ./cache/ directory with CSV files
-loader = CachedYFinanceLoader(cache_dir='./cache')
+# Default behavior (caches to ./data/)
+portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31')
+portfolio.load_data()  # First time: downloads and caches
+
+# Or specify custom cache directory
+loader = CachedYFinanceLoader(cache_dir='./my_cache')
 portfolio = Portfolio(['SPY', 'QQQ'], '2020-01-01', '2024-12-31', loader=loader)
 portfolio.load_data()  # First time: downloads and caches
 

@@ -5,7 +5,7 @@ Portfolio management module for loading and managing asset data.
 import pandas as pd
 from typing import List, Dict, Optional, Union
 from datetime import datetime
-from loaders import BaseDataLoader, YFinanceLoader
+from loaders import BaseDataLoader, CachedYFinanceLoader
 
 
 class Portfolio:
@@ -27,12 +27,12 @@ class Portfolio:
         end_date : str
             End date in 'YYYY-MM-DD' format
         loader : BaseDataLoader, optional
-            Data loader instance. If None, uses YFinanceLoader by default.
+            Data loader instance. If None, uses CachedYFinanceLoader with './data' cache by default.
         """
         self.tickers = tickers
         self.start_date = start_date
         self.end_date = end_date
-        self.loader = loader if loader is not None else YFinanceLoader()
+        self.loader = loader if loader is not None else CachedYFinanceLoader(cache_dir='./data')
         self.data: Dict[str, pd.DataFrame] = {}
         self.close_prices: Optional[pd.DataFrame] = None
         self.returns: Optional[pd.DataFrame] = None

@@ -10,13 +10,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from portfolio import Portfolio
-from loaders import YFinanceLoader
+from loaders import YFinanceLoader, CachedYFinanceLoader
 
 def test_portfolio_basic_usage():
-    """Test basic portfolio usage with default loader."""
-    print("Testing Portfolio with default YFinanceLoader...")
+    """Test basic portfolio usage with default CachedYFinanceLoader."""
+    print("Testing Portfolio with default CachedYFinanceLoader...")
     
-    # Create portfolio (should use YFinanceLoader by default)
+    # Create portfolio (should use CachedYFinanceLoader by default)
     portfolio = Portfolio(['SPY'], '2024-01-01', '2024-01-31')
     
     # Load data

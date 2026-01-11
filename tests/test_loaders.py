@@ -14,7 +14,7 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from loaders import BaseDataLoader, YFinanceLoader
+from loaders import BaseDataLoader, YFinanceLoader, CachedYFinanceLoader
 from portfolio import Portfolio
 
 
@@ -195,9 +195,9 @@ class TestPortfolioIntegration(unittest.TestCase):
     """Test Portfolio integration with data loaders."""
     
     def test_portfolio_with_default_loader(self):
-        """Test Portfolio uses YFinanceLoader by default."""
+        """Test Portfolio uses CachedYFinanceLoader by default."""
         portfolio = Portfolio(['SPY'], '2023-01-01', '2023-12-31')
-        self.assertIsInstance(portfolio.loader, YFinanceLoader)
+        self.assertIsInstance(portfolio.loader, CachedYFinanceLoader)
     
     def test_portfolio_with_custom_loader(self):
         """Test Portfolio with custom data loader."""
