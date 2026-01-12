@@ -356,6 +356,34 @@ def run_comparison(ticker: str = 'SPY',
         f.write(f"**Period:** {start_date} to {end_date}\n\n")
         f.write(f"---\n\n")
         
+        # Configuration section
+        f.write(f"## Configuration\n\n")
+        if config_path:
+            f.write(f"**Config File:** `{config_path}`\n\n")
+        f.write(f"### Data Parameters\n")
+        f.write(f"- **Ticker:** {ticker}\n")
+        f.write(f"- **Start Date:** {start_date}\n")
+        f.write(f"- **End Date:** {end_date}\n\n")
+        
+        f.write(f"### Alpha Model Parameters\n")
+        f.write(f"- **Short Window:** {short_window}\n")
+        f.write(f"- **Long Window:** {long_window}\n\n")
+        
+        f.write(f"### Backtest Parameters\n")
+        f.write(f"- **Rebalance Frequency:** {rebalance_frequency} period(s)\n")
+        f.write(f"- **Transaction Cost:** {transaction_cost*100:.3f}%\n\n")
+        
+        f.write(f"### HMM Parameters\n")
+        f.write(f"- **Training Window:** {train_window} periods\n")
+        f.write(f"- **Refit Every:** {refit_every} periods\n")
+        f.write(f"- **Bear Probability Threshold:** {bear_prob_threshold}\n")
+        f.write(f"- **Bull Probability Threshold:** {bull_prob_threshold}\n\n")
+        
+        f.write(f"### Output Settings\n")
+        f.write(f"- **Save Plots:** {save_plots}\n")
+        f.write(f"- **Output Directory:** `{output_dir}`\n\n")
+        f.write(f"---\n\n")
+        
         # Benchmark performance
         f.write(f"## Benchmark Performance (Buy & Hold)\n\n")
         f.write(f"- **Total Return:** {benchmark_metrics['total_return']*100:.2f}%\n")
