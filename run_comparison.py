@@ -9,6 +9,7 @@ from datetime import datetime
 from portfolio import Portfolio
 from backtest import BacktestEngine
 from alpha_models import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
+from alpha_model_factory import AlphaModelFactory
 from signal_filter import HMMRegimeFilter
 from statistics import Statistics
 from plotter import BacktestPlotter
@@ -85,8 +86,36 @@ def run_comparison(ticker: str = 'SPY',
         ticker = config.get('data', {}).get('ticker', ticker)
         start_date = config.get('data', {}).get('start_date', start_date)
         end_date = config.get('data', {}).get('end_date', end_date)
-        short_window = config.get('alpha_model', {}).get('short_window', short_window)
-        long_window = config.get('alpha_model', {}).get('long_window', long_window)
+        
+        # Check for alpha_models list (new format) or alpha_model (legacy format)
+        if 'alpha_models' in config:
+            # New format: list of alpha model configurations
+            alpha_model_configs = config['alpha_models']
+            alpha_models = []
+            model_params = {}  # Store params for each model
+            
+            print(f"\nLoading {len(alpha_model_configs)} alpha model(s) from config...")
+            for model_config in alpha_model_configs:
+                model_type = model_config.get('type')
+                params = model_config.get('parameters', {})
+                model_class = AlphaModelFactory._MODELS.get(model_type)
+                
+                if model_class is None:
+                    raise ValueError(f"Unknown model type: {model_type}")
+                
+                alpha_models.append(model_class)
+                model_params[model_type] = params
+                print(f"  - {model_type}: short={params.get('short_window', short_window)}, long={params.get('long_window', long_window)}")
+            
+            # Store model params for later use
+            config['_model_params'] = model_params
+            
+        elif 'alpha_model' in config:
+            # Legacy format: single alpha model
+            print("\nUsing legacy single alpha_model config format")
+            short_window = config.get('alpha_model', {}).get('parameters', {}).get('short_window', short_window)
+            long_window = config.get('alpha_model', {}).get('parameters', {}).get('long_window', long_window)
+        
         rebalance_frequency = config.get('backtest', {}).get('rebalance_frequency', rebalance_frequency)
         transaction_cost = config.get('backtest', {}).get('transaction_cost', transaction_cost)
         save_plots = config.get('output', {}).get('save_plots', save_plots)
@@ -97,6 +126,8 @@ def run_comparison(ticker: str = 'SPY',
         refit_every = config.get('hmm', {}).get('refit_every', refit_every)
         bear_prob_threshold = config.get('hmm', {}).get('bear_prob_threshold', bear_prob_threshold)
         bull_prob_threshold = config.get('hmm', {}).get('bull_prob_threshold', bull_prob_threshold)
+    else:
+        config = None
     
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
@@ -145,7 +176,17 @@ def run_comparison(ticker: str = 'SPY',
         print(f"TESTING: {model_name}")
         print(f"{'='*80}")
         
-        model = model_class(short_window=short_window, long_window=long_window)
+        # Get model-specific params from config if available
+        if config and '_model_params' in config and model_name in config['_model_params']:
+            model_params = config['_model_params'][model_name]
+            model_short = model_params.get('short_window', short_window)
+            model_long = model_params.get('long_window', long_window)
+            print(f"Using config params: short={model_short}, long={model_long}")
+        else:
+            model_short = short_window
+            model_long = long_window
+        
+        model = model_class(short_window=model_short, long_window=model_long)
         
         # Strategy 1: Alpha only
         print(f"\n[1/4] Running {model_name} - Alpha Only...")

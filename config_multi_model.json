@@ -1,0 +1,79 @@
+{
+  "backtest": {
+    "initial_capital": 100000.0,
+    "transaction_cost": 0.001,
+    "rebalance_frequency": 1
+  },
+  "strategy": {
+    "strategy_mode": "alpha_hmm_combine",
+    "walk_forward": true
+  },
+  "hmm": {
+    "n_states": 3,
+    "random_state": 42,
+    "train_window": 252,
+    "refit_every": 42,
+    "bear_prob_threshold": 0.65,
+    "bull_prob_threshold": 0.65
+  },
+  "alpha_models": [
+    {
+      "type": "SMA",
+      "parameters": {
+        "short_window": 56,
+        "long_window": 78
+      }
+    },
+    {
+      "type": "EMA",
+      "parameters": {
+        "short_window": 58,
+        "long_window": 108
+      }
+    },
+    {
+      "type": "WMA",
+      "parameters": {
+        "short_window": 69,
+        "long_window": 123
+      }
+    },
+    {
+      "type": "HMA",
+      "parameters": {
+        "short_window": 73,
+        "long_window": 76
+      }
+    },
+    {
+      "type": "KAMA",
+      "parameters": {
+        "short_window": 51,
+        "long_window": 55
+      }
+    },
+    {
+      "type": "TEMA",
+      "parameters": {
+        "short_window": 19,
+        "long_window": 170
+      }
+    },
+    {
+      "type": "ZLEMA",
+      "parameters": {
+        "short_window": 38,
+        "long_window": 111
+      }
+    }
+  ],
+  "data": {
+    "ticker": "SPY",
+    "start_date": "2020-01-01",
+    "end_date": "2025-12-31"
+  },
+  "output": {
+    "save_plots": true,
+    "output_dir": null
+  }
+}
