@@ -393,18 +393,18 @@ def run_comparison(ticker: str = 'SPY',
         
         # Top strategies
         f.write(f"## Top 10 Strategies by Total Return\n\n")
-        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) |\n")
-        f.write("|-------|----------|------------------|--------------|------------------|\n")
+        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Num Trades |\n")
+        f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
         for _, row in results_df.sort_values('Total Return (%)', ascending=False).head(10).iterrows():
-            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} |\n")
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
         # Top by Sharpe
         f.write(f"## Top 10 Strategies by Sharpe Ratio\n\n")
-        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) |\n")
-        f.write("|-------|----------|------------------|--------------|------------------|\n")
+        f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Num Trades |\n")
+        f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
         for _, row in results_df.sort_values('Sharpe Ratio', ascending=False).head(10).iterrows():
-            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} |\n")
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
         # Average performance by strategy type

@@ -13,6 +13,8 @@ from datetime import datetime
 from itertools import product
 from typing import Dict, List, Tuple, Any
 
+from loaders.cached_yfinance_loader import CachedYFinanceLoader
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
