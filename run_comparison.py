@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from portfolio import Portfolio
 from backtest import BacktestEngine
-from alpha_models import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA
+from alpha_models import SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA, BollingerBands
 from alpha_model_factory import AlphaModelFactory
 from signal_filter import HMMRegimeFilter
 from statistics import Statistics
@@ -214,7 +214,7 @@ def run_comparison(ticker = None,
         model = model_class(short_window=model_short, long_window=model_long)
         
         # Strategy 1: Alpha only
-        print(f"\n[1/4] Running {model_name} - Alpha Only...")
+        print(f"\n[1/5] Running {model_name} - Alpha Only...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Note: Multi-asset mode without regime rebalancing (static equal weights)")
         engine_alpha = BacktestEngine(close, model)
@@ -245,7 +245,7 @@ def run_comparison(ticker = None,
         })
         
         # Strategy 2: HMM only
-        print(f"\n[2/4] Running {model_name} - HMM Only...")
+        print(f"\n[2/5] Running {model_name} - HMM Only...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -282,7 +282,7 @@ def run_comparison(ticker = None,
         })
         
         # Strategy 3: Alpha + HMM Filter
-        print(f"\n[3/4] Running {model_name} - Alpha + HMM Filter...")
+        print(f"\n[3/5] Running {model_name} - Alpha + HMM Filter...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -319,7 +319,7 @@ def run_comparison(ticker = None,
         })
         
         # Strategy 4: Alpha + HMM Combine
-        print(f"\n[4/4] Running {model_name} - Alpha + HMM Combine...")
+        print(f"\n[4/5] Running {model_name} - Alpha + HMM Combine...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -353,6 +353,47 @@ def run_comparison(ticker = None,
             'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
             'Num Trades': results_combine['num_trades'],
             'Time in Market (%)': results_combine['time_in_market'] * 100
+        })
+        
+        # Strategy 5: Regime-Adaptive Alpha (Trend-following in bull/neutral, Bollinger Bands in bear)
+        print(f"\n[5/5] Running {model_name} - Regime-Adaptive Alpha...")
+        print("  Bull/Neutral: Trend-following | Bear: Bollinger Bands mean-reversion")
+        
+        # Create Bollinger Bands model for bear markets
+        bb_model = BollingerBands(short_window=20, long_window=2)
+        
+        hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+        engine_adaptive = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
+                                        bear_alpha_model=bb_model)
+        results_adaptive = engine_adaptive.run(
+            strategy_mode='regime_adaptive_alpha',
+            walk_forward=True,
+            train_window=train_window,
+            refit_every=refit_every,
+            bear_prob_threshold=bear_prob_threshold,
+            bull_prob_threshold=bull_prob_threshold,
+            rebalance_frequency=rebalance_frequency,
+            transaction_cost=transaction_cost
+        )
+        
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_Regime_Adaptive.png')
+            BacktestPlotter.plot_results(results_adaptive, close, save_path=plot_file)
+            plt.close('all')
+        
+        results_list.append({
+            'Model': model_name,
+            'Strategy': 'Regime-Adaptive Alpha',
+            'Total Return (%)': results_adaptive['metrics']['total_return'] * 100,
+            'Annual Return (%)': results_adaptive['metrics']['annualized_return'] * 100,
+            'Sharpe Ratio': results_adaptive['metrics']['sharpe_ratio'],
+            'Sortino Ratio': results_adaptive['metrics']['sortino_ratio'],
+            'Max Drawdown (%)': results_adaptive['metrics']['max_drawdown'] * 100,
+            'Profit Factor': results_adaptive['metrics']['profit_factor'],
+            'Win Rate (%)': results_adaptive['metrics']['win_rate'] * 100,
+            'Num Trades': results_adaptive['num_trades'],
+            'Time in Market (%)': results_adaptive['time_in_market'] * 100
         })
     
     # Create results DataFrame
@@ -595,9 +636,9 @@ def run_comparison(ticker = None,
         
         # Count individual plots
         num_models = len(alpha_models)
-        num_plots = num_models * 4  # 4 strategies per model
+        num_plots = num_models * 5  # 5 strategies per model
         print(f"✓ Individual plots saved to {os.path.join(output_dir, 'individual_plots/')}")
-        print(f"  Total: {num_plots} plots ({num_models} models × 4 strategies)")
+        print(f"  Total: {num_plots} plots ({num_models} models × 5 strategies)")
     
     return results_df, output_dir
 

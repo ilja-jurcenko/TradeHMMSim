@@ -20,6 +20,7 @@ class BacktestEngine:
                  alpha_model: Optional[AlphaModel] = None,
                  alpha_config: Optional[Dict[str, Any]] = None,
                  hmm_filter: Optional[HMMRegimeFilter] = None,
+                 bear_alpha_model: Optional[AlphaModel] = None,
                  initial_capital: float = 100000.0):
         """
         Initialize backtest engine.
@@ -29,7 +30,7 @@ class BacktestEngine:
         close : pd.Series
             Close price series
         alpha_model : AlphaModel, optional
-            Alpha model instance for signal generation.
+            Alpha model instance for signal generation (used in bull/neutral regimes).
             Provide either this OR alpha_config, not both.
         alpha_config : Dict[str, Any], optional
             Alpha model configuration dictionary with 'type' and 'parameters'.
@@ -37,6 +38,9 @@ class BacktestEngine:
             Example: {'type': 'SMA', 'parameters': {'short_window': 50, 'long_window': 200}}
         hmm_filter : HMMRegimeFilter, optional
             HMM filter for regime-based filtering
+        bear_alpha_model : AlphaModel, optional
+            Alternative alpha model for bear markets (e.g., Bollinger Bands for mean-reversion).
+            Used with 'regime_adaptive_alpha' strategy mode.
         initial_capital : float
             Initial capital
             
@@ -47,6 +51,7 @@ class BacktestEngine:
         """
         self.close = close
         self.hmm_filter = hmm_filter
+        self.bear_alpha_model = bear_alpha_model
         self.initial_capital = initial_capital
         
         # Handle alpha model initialization
@@ -176,6 +181,7 @@ class BacktestEngine:
             - 'hmm_only': HMM regime signals only
             - 'alpha_hmm_filter': HMM filters incorrect alpha signals (bear filter)
             - 'alpha_hmm_combine': Combine alpha and HMM signals (take position when either signals)
+            - 'regime_adaptive_alpha': Use trend-following in bull/neutral, mean-reversion in bear
         rebalance_frequency : int
             Rebalancing frequency (1 = every period, 5 = every 5 periods, etc.)
         walk_forward : bool
@@ -294,6 +300,42 @@ class BacktestEngine:
                 positions[contrarian_entry] = True
                 
                 positions = positions.astype(int)
+            
+            elif strategy_mode == 'regime_adaptive_alpha':
+                # Regime-Adaptive Alpha: Switch strategies based on market regime
+                # 
+                # Strategy:
+                #   - Bull/Neutral: Use trend-following alpha (standard alpha_model)
+                #   - Bear: Use mean-reversion alpha (bear_alpha_model, typically Bollinger Bands)
+                #
+                # This adapts to market conditions: ride trends up, catch bounces down
+                
+                if self.bear_alpha_model is None:
+                    raise ValueError(
+                        "regime_adaptive_alpha strategy requires bear_alpha_model to be set"
+                    )
+                
+                # Generate signals from bear market alpha model (e.g., Bollinger Bands)
+                bear_signals = self.bear_alpha_model.generate_signals(self.close)
+                bear_signals_aligned = bear_signals.reindex(common_idx, fill_value=0)
+                
+                # Determine current regime for each period
+                positions = pd.Series(0, index=common_idx)
+                
+                # Use trend-following in bull/neutral, mean-reversion in bear
+                for i in range(len(common_idx)):
+                    idx = common_idx[i]
+                    current_regime = regime.loc[idx]
+                    
+                    if current_regime == 'bear':
+                        # Use bear market strategy (mean-reversion)
+                        positions.iloc[i] = bear_signals_aligned.iloc[i]
+                    else:
+                        # Use bull/neutral market strategy (trend-following)
+                        positions.iloc[i] = alpha_signals_aligned.iloc[i]
+                
+                print(f"  Regime switches - Trend-following: {(regime != 'bear').sum()} periods, "
+                      f"Mean-reversion: {(regime == 'bear').sum()} periods")
             
             # Store regime info for later use
             self.regime_probs = probs

@@ -8,6 +8,7 @@ from .hma import HMA
 from .kama import KAMA
 from .tema import TEMA
 from .zlema import ZLEMA
+from .bollinger import BollingerBands
 
 __all__ = [
     'AlphaModel',
@@ -17,5 +18,6 @@ __all__ = [
     'HMA',
     'KAMA',
     'TEMA',
-    'ZLEMA'
+    'ZLEMA',
+    'BollingerBands'
 ]

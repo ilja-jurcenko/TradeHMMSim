@@ -307,7 +307,8 @@ class TestAlphaModelFactory(unittest.TestCase):
         self.assertIn('KAMA', models)
         self.assertIn('TEMA', models)
         self.assertIn('ZLEMA', models)
-        self.assertEqual(len(models), 7)
+        self.assertIn('BollingerBands', models)
+        self.assertEqual(len(models), 8)
     
     def test_get_default_parameters(self):
         """Test getting default parameters."""
@@ -331,10 +332,10 @@ class TestAlphaModelFactory(unittest.TestCase):
         models = AlphaModelFactory.create_all_models(short_window=10, long_window=30)
         
         self.assertIsInstance(models, dict)
-        self.assertEqual(len(models), 7)
+        self.assertEqual(len(models), 8)
         
         # Check all models are present and have correct parameters
-        for model_type in ['SMA', 'EMA', 'WMA', 'HMA', 'KAMA', 'TEMA', 'ZLEMA']:
+        for model_type in ['SMA', 'EMA', 'WMA', 'HMA', 'KAMA', 'TEMA', 'ZLEMA', 'BollingerBands']:
             self.assertIn(model_type, models)
             self.assertEqual(models[model_type].short_window, 10)
             self.assertEqual(models[model_type].long_window, 30)
@@ -343,7 +344,7 @@ class TestAlphaModelFactory(unittest.TestCase):
         """Test creating all models with default parameters."""
         models = AlphaModelFactory.create_all_models()
         
-        self.assertEqual(len(models), 7)
+        self.assertEqual(len(models), 8)
         
         # Check default parameters
         for model in models.values():

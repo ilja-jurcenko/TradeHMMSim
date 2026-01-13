@@ -12,6 +12,7 @@ from alpha_models.hma import HMA
 from alpha_models.kama import KAMA
 from alpha_models.tema import TEMA
 from alpha_models.zlema import ZLEMA
+from alpha_models.bollinger import BollingerBands
 
 
 class AlphaModelFactory:
@@ -25,7 +26,8 @@ class AlphaModelFactory:
         'HMA': HMA,
         'KAMA': KAMA,
         'TEMA': TEMA,
-        'ZLEMA': ZLEMA
+        'ZLEMA': ZLEMA,
+        'BollingerBands': BollingerBands
     }
     
     @staticmethod
