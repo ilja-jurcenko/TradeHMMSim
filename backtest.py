@@ -372,7 +372,7 @@ class BacktestEngine:
         
         # Calculate additional statistics
         num_trades = int(np.sum(np.abs(positions.diff().fillna(0))) / 2)
-        time_in_market = float(np.sum(positions > 0) / len(positions))
+        time_in_market = float(np.sum(positions != 0) / len(positions))
         
         # Store results
         self.positions = positions
