@@ -115,11 +115,11 @@ class BollingerBands(AlphaModel):
             # Hold position
             elif in_position:
                 signals.iloc[i] = 1
-            # Sell signal (optional): price crosses above upper band
+            # Short signal: price crosses above upper band (overbought)
             elif not in_position and prev_price <= self._upper_band.iloc[i-1] and curr_price > self._upper_band.iloc[i]:
                 signals.iloc[i] = -1
             else:
-                signals.iloc[i] = signals.iloc[i-1] if not in_position else 1
+                signals.iloc[i] = 0
         
         return signals
     

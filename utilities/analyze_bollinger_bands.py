@@ -131,11 +131,25 @@ def analyze_bollinger_bands(ticker: str = 'SPY',
     positions = results['positions']
     trades = (positions.diff() != 0).sum()
     long_periods = (positions == 1).sum()
+    short_periods = (positions == -1).sum()
     flat_periods = (positions == 0).sum()
     
+    # Count signal types
+    prev_positions = positions.shift(1)
+    buy_signals = ((positions == 1) & (prev_positions != 1)).sum()
+    sell_signals = ((positions == 0) & (prev_positions == 1)).sum()
+    short_signals = ((positions == -1) & (prev_positions != -1)).sum()
+    cover_signals = ((positions == 0) & (prev_positions == -1)).sum()
+    
     print(f"Total Signals:       {trades:>10}")
-    print(f"Long Periods:        {long_periods:>10} ({long_periods/len(positions)*100:.1f}%)")
-    print(f"Flat Periods:        {flat_periods:>10} ({flat_periods/len(positions)*100:.1f}%)")
+    print(f"  Buy Signals:       {buy_signals:>10}")
+    print(f"  Sell Signals:      {sell_signals:>10}")
+    print(f"  Short Signals:     {short_signals:>10}")
+    print(f"  Cover Signals:     {cover_signals:>10}")
+    print(f"\nPosition Breakdown:")
+    print(f"  Long Periods:      {long_periods:>10} ({long_periods/len(positions)*100:.1f}%)")
+    print(f"  Short Periods:     {short_periods:>10} ({short_periods/len(positions)*100:.1f}%)")
+    print(f"  Flat Periods:      {flat_periods:>10} ({flat_periods/len(positions)*100:.1f}%)")
     
     # Band Statistics
     print("\n📉 BOLLINGER BANDS STATISTICS")
@@ -166,13 +180,35 @@ def analyze_bollinger_bands(ticker: str = 'SPY',
         ax1.plot(lower_band.index, lower_band.values, '--', label='Lower Band', color='green', alpha=0.7)
         ax1.fill_between(close.index, lower_band.values, upper_band.values, alpha=0.1, color='gray')
         
-        # Mark entry/exit points
-        entries = positions.diff() == 1
-        exits = positions.diff() == -1
-        ax1.scatter(close.index[entries], close[entries], marker='^', color='green', s=100, 
-                   label='Buy Signal', zorder=5)
-        ax1.scatter(close.index[exits], close[exits], marker='v', color='red', s=100, 
-                   label='Sell Signal', zorder=5)
+        # Mark entry/exit points with detailed signal types
+        position_diff = positions.diff()
+        prev_positions = positions.shift(1)
+        
+        # Buy signals: entering long (0->1 or -1->1)
+        buy_signals = (positions == 1) & (prev_positions != 1)
+        
+        # Sell signals: exiting long to flat (1->0)
+        sell_signals = (positions == 0) & (prev_positions == 1)
+        
+        # Short signals: entering short (0->-1 or 1->-1)
+        short_signals = (positions == -1) & (prev_positions != -1)
+        
+        # Cover signals: exiting short to flat (-1->0)
+        cover_signals = (positions == 0) & (prev_positions == -1)
+        
+        # Plot signals
+        if buy_signals.any():
+            ax1.scatter(close.index[buy_signals], close[buy_signals], marker='^', 
+                       color='green', s=120, label='Buy (Long)', zorder=5, edgecolors='darkgreen', linewidths=1.5)
+        if sell_signals.any():
+            ax1.scatter(close.index[sell_signals], close[sell_signals], marker='v', 
+                       color='red', s=120, label='Sell (Exit Long)', zorder=5, edgecolors='darkred', linewidths=1.5)
+        if short_signals.any():
+            ax1.scatter(close.index[short_signals], close[short_signals], marker='v', 
+                       color='orange', s=120, label='Short', zorder=5, edgecolors='darkorange', linewidths=1.5)
+        if cover_signals.any():
+            ax1.scatter(close.index[cover_signals], close[cover_signals], marker='^', 
+                       color='blue', s=120, label='Cover (Exit Short)', zorder=5, edgecolors='darkblue', linewidths=1.5)
         
         ax1.set_title(f'{ticker} - Bollinger Bands Strategy ({period} period, {std_dev} std)', fontsize=14, fontweight='bold')
         ax1.set_ylabel('Price ($)', fontsize=11)

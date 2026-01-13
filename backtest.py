@@ -213,8 +213,8 @@ class BacktestEngine:
         # Generate alpha signals
         alpha_signals = self.alpha_model.generate_signals(self.close)
         
-        # Initialize positions
-        positions = alpha_signals.copy()
+        # Apply finite state machine logic to validate transitions
+        positions = self._apply_fsm_logic(alpha_signals)
         
         # Apply HMM filtering if needed
         if strategy_mode != 'alpha_only' and self.hmm_filter is not None:
@@ -416,6 +416,73 @@ class BacktestEngine:
         print(f"Total Return: {metrics['total_return']*100:.2f}%")
         
         return results
+    
+    def _apply_fsm_logic(self, signals: pd.Series) -> pd.Series:
+        """
+        Apply finite state machine logic to validate position transitions.
+        
+        Position States:
+        - FLAT (0): No position
+        - LONG (1): Holding long position
+        - SHORT (-1): Holding short position
+        
+        Allowed Transitions:
+        - FLAT -> LONG (BUY signal: 0 -> 1)
+        - FLAT -> SHORT (SHORT signal: 0 -> -1)
+        - LONG -> FLAT (SELL signal: 1 -> 0)
+        - SHORT -> FLAT (COVER signal: -1 -> 0)
+        
+        Invalid Transitions (ignored):
+        - LONG -> LONG (can't buy when already long)
+        - SHORT -> SHORT (can't short when already short)
+        - FLAT -> FLAT with SELL/COVER (can't exit when no position)
+        
+        Parameters:
+        -----------
+        signals : pd.Series
+            Raw signals from alpha model
+            
+        Returns:
+        --------
+        pd.Series
+            Validated positions following FSM rules
+        """
+        positions = pd.Series(0, index=signals.index)
+        current_state = 0  # Start FLAT
+        
+        for i in range(len(signals)):
+            requested_signal = signals.iloc[i]
+            
+            # State transition logic
+            if current_state == 0:  # FLAT
+                # Can BUY (go LONG) or SHORT
+                if requested_signal == 1:
+                    current_state = 1  # BUY: FLAT -> LONG
+                elif requested_signal == -1:
+                    current_state = -1  # SHORT: FLAT -> SHORT
+                # else: stay FLAT (ignore redundant FLAT signals)
+                
+            elif current_state == 1:  # LONG
+                # Can only SELL (go FLAT)
+                if requested_signal == 0:
+                    current_state = 0  # SELL: LONG -> FLAT
+                elif requested_signal == -1:
+                    # Direct transition LONG -> SHORT (exit long, enter short)
+                    current_state = -1
+                # else: stay LONG (ignore redundant LONG signals)
+                
+            elif current_state == -1:  # SHORT
+                # Can only COVER (go FLAT)
+                if requested_signal == 0:
+                    current_state = 0  # COVER: SHORT -> FLAT
+                elif requested_signal == 1:
+                    # Direct transition SHORT -> LONG (cover short, enter long)
+                    current_state = 1
+                # else: stay SHORT (ignore redundant SHORT signals)
+            
+            positions.iloc[i] = current_state
+        
+        return positions
     
     def _apply_rebalancing(self, positions: pd.Series, frequency: int) -> pd.Series:
         """
