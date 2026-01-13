@@ -3,18 +3,18 @@ Portfolio management module for loading and managing asset data.
 """
 
 import pandas as pd
+import numpy as np
 from typing import List, Dict, Optional, Union
-from datetime import datetime
-from loaders import BaseDataLoader, CachedYFinanceLoader
-
-
+from loaders.base_loader import BaseDataLoader
+from loaders.cached_yfinance_loader import CachedYFinanceLoader
 class Portfolio:
     """
     Portfolio class for managing assets with pluggable data loaders.
     """
     
     def __init__(self, tickers: List[str], start_date: str, end_date: str, 
-                 loader: Optional[BaseDataLoader] = None):
+                 loader: Optional[BaseDataLoader] = None,
+                 weights: Optional[Dict[str, float]] = None):
         """
         Initialize Portfolio.
         
@@ -28,6 +28,9 @@ class Portfolio:
             End date in 'YYYY-MM-DD' format
         loader : BaseDataLoader, optional
             Data loader instance. If None, uses CachedYFinanceLoader with './data' cache by default.
+        weights : Dict[str, float], optional
+            Initial weights for each ticker. If None, equal weighting is used.
+            Weights should sum to 1.0. Example: {'SPY': 0.6, 'AGG': 0.4}
         """
         self.tickers = tickers
         self.start_date = start_date
@@ -36,6 +39,19 @@ class Portfolio:
         self.data: Dict[str, pd.DataFrame] = {}
         self.close_prices: Optional[pd.DataFrame] = None
         self.returns: Optional[pd.DataFrame] = None
+        
+        # Initialize weights
+        if weights is None:
+            # Equal weighting by default
+            self.weights = {ticker: 1.0 / len(tickers) for ticker in tickers}
+        else:
+            self.weights = weights.copy()
+            # Validate weights
+            if set(weights.keys()) != set(tickers):
+                raise ValueError("Weights keys must match tickers list")
+            weight_sum = sum(weights.values())
+            if not np.isclose(weight_sum, 1.0, atol=0.01):
+                raise ValueError(f"Weights must sum to 1.0, got {weight_sum:.4f}")
         
     def load_data(self, progress: bool = False) -> None:
         """
@@ -207,6 +223,95 @@ class Portfolio:
         """
         return self.tickers
     
+    def set_weights(self, weights: Dict[str, float]) -> None:
+        """
+        Set portfolio weights.
+        
+        Parameters:
+        -----------
+        weights : Dict[str, float]
+            Dictionary of ticker: weight pairs. Must sum to 1.0.
+            
+        Raises:
+        -------
+        ValueError
+            If weights don't match tickers or don't sum to 1.0
+        """
+        if set(weights.keys()) != set(self.tickers):
+            raise ValueError(f"Weights keys {set(weights.keys())} must match tickers {set(self.tickers)}")
+        
+        weight_sum = sum(weights.values())
+        if not np.isclose(weight_sum, 1.0, atol=0.01):
+            raise ValueError(f"Weights must sum to 1.0, got {weight_sum:.4f}")
+        
+        self.weights = weights.copy()
+    
+    def get_weights(self) -> Dict[str, float]:
+        """
+        Get current portfolio weights.
+        
+        Returns:
+        --------
+        Dict[str, float]
+            Dictionary of ticker: weight pairs
+        """
+        return self.weights.copy()
+    
+    def get_weighted_returns(self) -> pd.Series:
+        """
+        Calculate portfolio returns using current weights.
+        
+        Returns:
+        --------
+        pd.Series
+            Weighted portfolio returns
+        """
+        if self.returns is None:
+            raise ValueError("No data loaded. Call load_data() first.")
+        
+        # Apply weights to returns
+        weighted_returns = pd.Series(0.0, index=self.returns.index)
+        for ticker in self.tickers:
+            if ticker in self.returns.columns:
+                weighted_returns += self.returns[ticker] * self.weights[ticker]
+        
+        return weighted_returns
+    
+    def rebalance_regime_based(self, regime: str, aggressive_ticker: str = 'SPY', 
+                               defensive_ticker: str = 'AGG') -> None:
+        """
+        Rebalance portfolio based on market regime.
+        
+        Parameters:
+        -----------
+        regime : str
+            Market regime: 'bull', 'neutral', or 'bear'
+        aggressive_ticker : str
+            Ticker for aggressive allocation (default: 'SPY')
+        defensive_ticker : str
+            Ticker for defensive allocation (default: 'AGG')
+            
+        Rules:
+        ------
+        - Bull/Neutral: 100% aggressive (SPY)
+        - Bear: 100% defensive (AGG)
+        """
+        if aggressive_ticker not in self.tickers or defensive_ticker not in self.tickers:
+            raise ValueError(f"Both {aggressive_ticker} and {defensive_ticker} must be in portfolio")
+        
+        new_weights = {ticker: 0.0 for ticker in self.tickers}
+        
+        if regime in ['bull', 'neutral']:
+            # 100% aggressive asset
+            new_weights[aggressive_ticker] = 1.0
+        elif regime == 'bear':
+            # 100% defensive asset
+            new_weights[defensive_ticker] = 1.0
+        else:
+            raise ValueError(f"Unknown regime: {regime}. Use 'bull', 'neutral', or 'bear'")
+        
+        self.set_weights(new_weights)
+    
     def summary(self) -> None:
         """Print portfolio summary."""
         print("\n" + "="*60)
@@ -215,6 +320,10 @@ class Portfolio:
         print(f"Period: {self.start_date} to {self.end_date}")
         print(f"Tickers: {len(self.tickers)}")
         print(f"Loaded assets: {len(self.data)}")
+        print("\nCurrent Weights:")
+        for ticker in self.tickers:
+            weight_pct = self.weights[ticker] * 100
+            print(f"  {ticker}: {weight_pct:.1f}%")
         print("\nAsset details:")
         for ticker in self.tickers:
             if ticker in self.data:

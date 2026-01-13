@@ -20,7 +20,7 @@ matplotlib.use('Agg')  # Use non-interactive backend for saving plots
 import matplotlib.pyplot as plt
 
 
-def run_comparison(ticker: str = 'SPY', 
+def run_comparison(ticker = None, 
                    start_date: str = '2018-01-01',
                    end_date: str = '2024-12-31',
                    alpha_models: list = None,
@@ -34,14 +34,15 @@ def run_comparison(ticker: str = 'SPY',
                    train_window: int = 504,
                    refit_every: int = 21,
                    bear_prob_threshold: float = 0.65,
-                   bull_prob_threshold: float = 0.65):
+                   bull_prob_threshold: float = 0.65,
+                   use_regime_rebalancing: bool = True):
     """
     Run comprehensive comparison of AlphaModels with and without HMM filtering.
     
     Parameters:
     -----------
-    ticker : str
-        Ticker symbol to test
+    ticker : str or List[str]
+        Ticker symbol(s) to test. Default is ['SPY', 'AGG'] for multi-asset regime-based allocation.
     start_date : str
         Start date for backtest
     end_date : str
@@ -70,12 +71,23 @@ def run_comparison(ticker: str = 'SPY',
         Bear regime probability threshold
     bull_prob_threshold : float
         Bull regime probability threshold
+    use_regime_rebalancing : bool
+        Whether to use regime-based portfolio rebalancing for multi-asset portfolios.
+        When True with HMM strategies, automatically shifts between SPY (bull/neutral) and AGG (bear).
         
     Returns:
     --------
     tuple
         (results_df, output_directory)
     """
+    # Set default ticker to multi-asset portfolio if not provided
+    if ticker is None:
+        ticker = ['SPY', 'AGG']  # Default to two-asset portfolio with regime-based allocation
+    
+    # Ensure ticker is a list for consistent handling
+    if isinstance(ticker, str):
+        ticker = [ticker]
+    
     # Load configuration from file if provided
     if config_path is not None:
         print(f"\nLoading configuration from: {config_path}")
@@ -83,7 +95,11 @@ def run_comparison(ticker: str = 'SPY',
         ConfigLoader.print_config(config)
         
         # Override parameters with config values
-        ticker = config.get('data', {}).get('ticker', ticker)
+        config_ticker = config.get('data', {}).get('ticker', ticker)
+        if isinstance(config_ticker, str):
+            ticker = [config_ticker]
+        else:
+            ticker = config_ticker
         start_date = config.get('data', {}).get('start_date', start_date)
         end_date = config.get('data', {}).get('end_date', end_date)
         
@@ -118,6 +134,7 @@ def run_comparison(ticker: str = 'SPY',
         
         rebalance_frequency = config.get('backtest', {}).get('rebalance_frequency', rebalance_frequency)
         transaction_cost = config.get('backtest', {}).get('transaction_cost', transaction_cost)
+        use_regime_rebalancing = config.get('backtest', {}).get('use_regime_rebalancing', use_regime_rebalancing)
         save_plots = config.get('output', {}).get('save_plots', save_plots)
         output_dir_cfg = config.get('output', {}).get('output_dir')
         if output_dir_cfg is not None:
@@ -154,13 +171,21 @@ def run_comparison(ticker: str = 'SPY',
     if alpha_models is None:
         alpha_models = [SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA]
     
+    # Determine if using multi-asset portfolio
+    is_multi_asset = len(ticker) > 1
+    ticker_str = ', '.join(ticker) if is_multi_asset else ticker[0]
+    
     # Load data
-    print(f"\nLoading data for {ticker}...")
-    portfolio = Portfolio([ticker], start_date, end_date)
+    print(f"\nLoading data for {ticker_str}...")
+    if is_multi_asset:
+        print(f"Using multi-asset portfolio with regime-based rebalancing: {use_regime_rebalancing}")
+    portfolio = Portfolio(ticker, start_date, end_date)
     portfolio.load_data()
     portfolio.summary()
     
-    close = portfolio.get_close_prices(ticker)
+    # Get close prices - use primary ticker (first in list) for alpha signal generation
+    primary_ticker = ticker[0]
+    close = portfolio.get_close_prices(primary_ticker)
     
     # Initialize HMM filter
     print("\nInitializing HMM regime filter...")
@@ -190,6 +215,8 @@ def run_comparison(ticker: str = 'SPY',
         
         # Strategy 1: Alpha only
         print(f"\n[1/4] Running {model_name} - Alpha Only...")
+        if is_multi_asset and use_regime_rebalancing:
+            print("  Note: Multi-asset mode without regime rebalancing (static equal weights)")
         engine_alpha = BacktestEngine(close, model)
         results_alpha = engine_alpha.run(
             strategy_mode='alpha_only',
@@ -219,6 +246,8 @@ def run_comparison(ticker: str = 'SPY',
         
         # Strategy 2: HMM only
         print(f"\n[2/4] Running {model_name} - HMM Only...")
+        if is_multi_asset and use_regime_rebalancing:
+            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
         engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
         results_hmm = engine_hmm.run(
@@ -254,6 +283,8 @@ def run_comparison(ticker: str = 'SPY',
         
         # Strategy 3: Alpha + HMM Filter
         print(f"\n[3/4] Running {model_name} - Alpha + HMM Filter...")
+        if is_multi_asset and use_regime_rebalancing:
+            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
         engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
         results_filter = engine_filter.run(
@@ -289,6 +320,8 @@ def run_comparison(ticker: str = 'SPY',
         
         # Strategy 4: Alpha + HMM Combine
         print(f"\n[4/4] Running {model_name} - Alpha + HMM Combine...")
+        if is_multi_asset and use_regime_rebalancing:
+            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
         engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
         results_combine = engine_combine.run(
@@ -329,7 +362,12 @@ def run_comparison(ticker: str = 'SPY',
     print("\n" + "="*80)
     print("CALCULATING BUY & HOLD BENCHMARK")
     print("="*80)
-    returns = close.pct_change().fillna(0)
+    if is_multi_asset:
+        # For multi-asset, use equal-weighted portfolio returns
+        print(f"Using equal-weighted portfolio: {ticker_str}")
+        returns = portfolio.get_weighted_returns()
+    else:
+        returns = close.pct_change().fillna(0)
     benchmark_metrics = Statistics.calculate_all_metrics(returns)
     
     print("\nBuy & Hold Performance:")
@@ -384,7 +422,8 @@ def run_comparison(ticker: str = 'SPY',
         print(f"  HMM Combine Impact: {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
     
     # Save results to output directory
-    output_file = os.path.join(output_dir, f'comparison_{ticker}_{start_date}_{end_date}.csv')
+    ticker_filename = '_'.join(ticker) if is_multi_asset else ticker[0]
+    output_file = os.path.join(output_dir, f'comparison_{ticker_filename}_{start_date}_{end_date}.csv')
     results_df.to_csv(output_file, index=False)
     print(f"\n✓ Results saved to {output_file}")
     
@@ -393,7 +432,11 @@ def run_comparison(ticker: str = 'SPY',
     with open(md_file, 'w') as f:
         f.write(f"# Backtest Analysis Report\n\n")
         f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        f.write(f"**Ticker:** {ticker}\n\n")
+        if is_multi_asset:
+            f.write(f"**Portfolio:** {ticker_str}\n\n")
+            f.write(f"**Regime Rebalancing:** {use_regime_rebalancing}\n\n")
+        else:
+            f.write(f"**Ticker:** {ticker[0]}\n\n")
         f.write(f"**Period:** {start_date} to {end_date}\n\n")
         f.write(f"---\n\n")
         
@@ -402,7 +445,10 @@ def run_comparison(ticker: str = 'SPY',
         if config_path:
             f.write(f"**Config File:** `{config_path}`\n\n")
         f.write(f"### Data Parameters\n")
-        f.write(f"- **Ticker:** {ticker}\n")
+        if is_multi_asset:
+            f.write(f"- **Portfolio:** {ticker_str}\n")
+        else:
+            f.write(f"- **Ticker:** {ticker[0]}\n")
         f.write(f"- **Start Date:** {start_date}\n")
         f.write(f"- **End Date:** {end_date}\n\n")
         
@@ -412,7 +458,13 @@ def run_comparison(ticker: str = 'SPY',
         
         f.write(f"### Backtest Parameters\n")
         f.write(f"- **Rebalance Frequency:** {rebalance_frequency} period(s)\n")
-        f.write(f"- **Transaction Cost:** {transaction_cost*100:.3f}%\n\n")
+        f.write(f"- **Transaction Cost:** {transaction_cost*100:.3f}%\n")
+        if is_multi_asset:
+            f.write(f"- **Regime-Based Rebalancing:** {use_regime_rebalancing}\n")
+            if use_regime_rebalancing:
+                f.write(f"  - Bull/Neutral → 100% {ticker[0]}, 0% {ticker[1]}\n")
+                f.write(f"  - Bear → 0% {ticker[0]}, 100% {ticker[1]}\n")
+        f.write(f"\n")
         
         f.write(f"### HMM Parameters\n")
         f.write(f"- **Training Window:** {train_window} periods\n")
@@ -476,10 +528,11 @@ def run_comparison(ticker: str = 'SPY',
         # Files generated
         f.write(f"---\n\n")
         f.write(f"## Generated Files\n\n")
-        f.write(f"- **CSV Results:** `comparison_{ticker}_{start_date}_{end_date}.csv`\n")
+        f.write(f"- **CSV Results:** `comparison_{ticker_filename}_{start_date}_{end_date}.csv`\n")
         if save_plots:
-            f.write(f"- **Summary Plots:** `comparison_plots_{ticker}.png`\n")
-            f.write(f"- **Individual Plots:** `individual_plots/` (28 plots)\n")
+            f.write(f"- **Summary Plots:** `comparison_plots_{ticker_filename}.png`\n")
+            num_plots = len(alpha_models) * 4
+            f.write(f"- **Individual Plots:** `individual_plots/` ({num_plots} plots)\n")
         f.write(f"\n")
     
     print(f"✓ Analysis report saved to {md_file}")
@@ -535,7 +588,7 @@ def run_comparison(ticker: str = 'SPY',
         ax4.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plot_file = os.path.join(output_dir, f'comparison_plots_{ticker}.png')
+        plot_file = os.path.join(output_dir, f'comparison_plots_{ticker_filename}.png')
         plt.savefig(plot_file, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"✓ Summary plots saved to {plot_file}")
@@ -560,7 +613,11 @@ if __name__ == '__main__':
             break
     
     # Parse command line arguments (config overrides these)
-    ticker = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'SPY'
+    ticker = None  # Will default to ['SPY', 'AGG'] in run_comparison
+    if len(sys.argv) > 1 and not sys.argv[1].startswith('--'):
+        # Support comma-separated tickers: SPY,AGG
+        ticker_arg = sys.argv[1]
+        ticker = ticker_arg.split(',') if ',' in ticker_arg else [ticker_arg]
     start_date = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else '2018-01-01'
     end_date = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith('--') else '2024-12-31'
     show_plots = '--plot' in sys.argv or '-p' in sys.argv
