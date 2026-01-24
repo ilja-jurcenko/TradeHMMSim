@@ -237,6 +237,7 @@ def run_comparison(ticker = None,
             'Annual Return (%)': results_alpha['metrics']['annualized_return'] * 100,
             'Sharpe Ratio': results_alpha['metrics']['sharpe_ratio'],
             'Sortino Ratio': results_alpha['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_alpha['metrics']['calmar_ratio'],
             'Max Drawdown (%)': results_alpha['metrics']['max_drawdown'] * 100,
             'Profit Factor': results_alpha['metrics']['profit_factor'],
             'Win Rate (%)': results_alpha['metrics']['win_rate'] * 100,
@@ -274,6 +275,7 @@ def run_comparison(ticker = None,
             'Annual Return (%)': results_hmm['metrics']['annualized_return'] * 100,
             'Sharpe Ratio': results_hmm['metrics']['sharpe_ratio'],
             'Sortino Ratio': results_hmm['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_hmm['metrics']['calmar_ratio'],
             'Max Drawdown (%)': results_hmm['metrics']['max_drawdown'] * 100,
             'Profit Factor': results_hmm['metrics']['profit_factor'],
             'Win Rate (%)': results_hmm['metrics']['win_rate'] * 100,
@@ -311,6 +313,7 @@ def run_comparison(ticker = None,
             'Annual Return (%)': results_filter['metrics']['annualized_return'] * 100,
             'Sharpe Ratio': results_filter['metrics']['sharpe_ratio'],
             'Sortino Ratio': results_filter['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_filter['metrics']['calmar_ratio'],
             'Max Drawdown (%)': results_filter['metrics']['max_drawdown'] * 100,
             'Profit Factor': results_filter['metrics']['profit_factor'],
             'Win Rate (%)': results_filter['metrics']['win_rate'] * 100,
@@ -340,6 +343,11 @@ def run_comparison(ticker = None,
             plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine.png')
             BacktestPlotter.plot_results(results_combine, close, save_path=plot_file)
             plt.close('all')
+            
+            # Save 4-state strategy plot
+            plot_file_4state = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine_4State.png')
+            BacktestPlotter.plot_4state_strategy(results_combine, close, save_path=plot_file_4state)
+            plt.close('all')
         
         results_list.append({
             'Model': model_name,
@@ -348,6 +356,7 @@ def run_comparison(ticker = None,
             'Annual Return (%)': results_combine['metrics']['annualized_return'] * 100,
             'Sharpe Ratio': results_combine['metrics']['sharpe_ratio'],
             'Sortino Ratio': results_combine['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_combine['metrics']['calmar_ratio'],
             'Max Drawdown (%)': results_combine['metrics']['max_drawdown'] * 100,
             'Profit Factor': results_combine['metrics']['profit_factor'],
             'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
@@ -389,6 +398,7 @@ def run_comparison(ticker = None,
             'Annual Return (%)': results_adaptive['metrics']['annualized_return'] * 100,
             'Sharpe Ratio': results_adaptive['metrics']['sharpe_ratio'],
             'Sortino Ratio': results_adaptive['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_adaptive['metrics']['calmar_ratio'],
             'Max Drawdown (%)': results_adaptive['metrics']['max_drawdown'] * 100,
             'Profit Factor': results_adaptive['metrics']['profit_factor'],
             'Win Rate (%)': results_adaptive['metrics']['win_rate'] * 100,
@@ -428,6 +438,11 @@ def run_comparison(ticker = None,
         ['Model', 'Strategy', 'Total Return (%)', 'Sharpe Ratio', 'Max Drawdown (%)']
     ].to_string(index=False))
     
+    print("\nTop 10 Strategies by Calmar Ratio:")
+    print(results_df.sort_values('Calmar Ratio', ascending=False).head(10)[
+        ['Model', 'Strategy', 'Total Return (%)', 'Calmar Ratio', 'Max Drawdown (%)']
+    ].to_string(index=False))
+    
     # Calculate average performance by strategy type
     print("\n" + "="*80)
     print("AVERAGE PERFORMANCE BY STRATEGY TYPE")
@@ -435,6 +450,7 @@ def run_comparison(ticker = None,
     avg_by_strategy = results_df.groupby('Strategy').agg({
         'Total Return (%)': 'mean',
         'Sharpe Ratio': 'mean',
+        'Calmar Ratio': 'mean',
         'Max Drawdown (%)': 'mean',
         'Num Trades': 'mean',
         'Time in Market (%)': 'mean'
@@ -541,12 +557,20 @@ def run_comparison(ticker = None,
             f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
+        # Top by Calmar
+        f.write(f"## Top 10 Strategies by Calmar Ratio\n\n")
+        f.write("| Model | Strategy | Total Return (%) | Calmar Ratio | Max Drawdown (%) | Num Trades |\n")
+        f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
+        for _, row in results_df.sort_values('Calmar Ratio', ascending=False).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Calmar Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
+        f.write("\n")
+        
         # Average performance by strategy type
         f.write(f"## Average Performance by Strategy Type\n\n")
-        f.write("| Strategy | Avg Total Return (%) | Avg Sharpe Ratio | Avg Max Drawdown (%) | Avg Num Trades | Avg Time in Market (%) |\n")
-        f.write("|----------|----------------------|------------------|----------------------|----------------|------------------------|\n")
+        f.write("| Strategy | Avg Total Return (%) | Avg Sharpe Ratio | Avg Calmar Ratio | Avg Max Drawdown (%) | Avg Num Trades | Avg Time in Market (%) |\n")
+        f.write("|----------|----------------------|------------------|------------------|----------------------|----------------|------------------------|\n")
         for strategy, row in avg_by_strategy.iterrows():
-            f.write(f"| {strategy} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.2f} | {row['Time in Market (%)']:.2f} |\n")
+            f.write(f"| {strategy} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Calmar Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.2f} | {row['Time in Market (%)']:.2f} |\n")
         f.write("\n")
         
         # HMM Impact Analysis
@@ -636,9 +660,9 @@ def run_comparison(ticker = None,
         
         # Count individual plots
         num_models = len(alpha_models)
-        num_plots = num_models * 5  # 5 strategies per model
+        num_plots = num_models * 6  # 5 strategies + 1 additional 4-state plot for alpha_hmm_combine
         print(f"✓ Individual plots saved to {os.path.join(output_dir, 'individual_plots/')}")
-        print(f"  Total: {num_plots} plots ({num_models} models × 5 strategies)")
+        print(f"  Total: {num_plots} plots ({num_models} models × 5 strategies + {num_models} 4-state plots)")
     
     return results_df, output_dir
 
