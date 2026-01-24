@@ -4,6 +4,10 @@ Tests 3 different HMM configurations:
 1. Baseline (504, 21) - Current production parameters  
 2. Optimal (252, 42) - Best from parameter search
 3. Stable (252, 63) - Most stable configuration
+
+Compares two implementations:
+- Forward Algorithm (manual): Optimized, no lookahead
+- Predict Proba: Uses library function, simpler but slower
 """
 
 import numpy as np
@@ -17,6 +21,7 @@ import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
 from matplotlib.lines import Line2D
 import os
+import time
 
 os.makedirs("hmm_analysis", exist_ok=True)
 
@@ -50,27 +55,49 @@ def calculate_performance_metrics(positions, close_prices):
     
     return sharpe, total_return
 
-def analyze_hmm_config(config, alpha_signals, close):
-    """Run analysis for a single HMM configuration."""
+def analyze_hmm_config(config, alpha_signals, close, method="forward"):
+    """Run analysis for a single HMM configuration.
+    
+    Parameters:
+    -----------
+    method : str
+        Either "forward" (manual forward algorithm) or "predict_proba" (library function)
+    """
+    method_name = "Forward Algorithm" if method == "forward" else "Predict Proba"
     print(f"\n{'='*80}")
-    print(f"ANALYZING: {config['name']} Configuration")
+    print(f"ANALYZING: {config['name']} Configuration - {method_name}")
     print(f"Parameters: train_window={config['train_window']}, refit_every={config['refit_every']}")
     print(f"Description: {config['description']}")
     print(f"{'='*80}")
     
     hmm_filter = HMMRegimeFilter(n_states=3, random_state=42)
-    probs, regime, switches = hmm_filter.walkforward_filter(close, train_window=config["train_window"], refit_every=config["refit_every"])
+    
+    start_time = time.time()
+    if method == "forward":
+        probs, regime, switches = hmm_filter.walkforward_filter(
+            close, train_window=config["train_window"], refit_every=config["refit_every"]
+        )
+    else:  # predict_proba
+        probs, regime, switches = hmm_filter.walkforward_filter_predict_proba(
+            close, train_window=config["train_window"], refit_every=config["refit_every"]
+        )
+    elapsed_time = time.time() - start_time
+    
     regime_info = hmm_filter.identify_regimes(close, regime)
     
+    print(f"Execution time: {elapsed_time:.2f} seconds")
     print(f"Regime Identification: Bear={regime_info['bear_regime']}, Bull={regime_info['bull_regime']}, Neutral={regime_info['neutral_regime']}")
-    print(f"Regime switches: {switches}")
+    print(f"Regime switches: {len(switches)}")
     
-    return {"probs": probs, "regime": regime, "switches": switches, **regime_info}
+    return {"probs": probs, "regime": regime, "switches": switches, "elapsed_time": elapsed_time, **regime_info}
 
 all_results = {}
 for config in hmm_configs:
-    result = analyze_hmm_config(config, alpha_signals, close)
-    all_results[config["name"]] = {**config, **result}
+    # Test both methods
+    for method in ["forward", "predict_proba"]:
+        result = analyze_hmm_config(config, alpha_signals, close, method=method)
+        method_suffix = "_forward" if method == "forward" else "_predict_proba"
+        all_results[config["name"] + method_suffix] = {**config, "method": method, **result}
 
 print(f"\n{'='*80}")
 print("GENERATING VISUALIZATIONS")
@@ -100,7 +127,9 @@ for config_name, result in all_results.items():
     
     # Generate plot
     fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
-    fig.suptitle(f"HMM Analysis - {config_name} | Sharpe: {sharpe:.3f} | Return: {total_return*100:.2f}% | Switches: {len(result['switches'])}", fontsize=14, fontweight="bold")
+    method_label = result.get('method', 'forward').replace('_', ' ').title()
+    time_label = f" | Time: {result.get('elapsed_time', 0):.1f}s"
+    fig.suptitle(f"HMM Analysis - {config_name} | {method_label} | Sharpe: {sharpe:.3f} | Return: {total_return*100:.2f}% | Switches: {len(result['switches'])}{time_label}", fontsize=14, fontweight="bold")
     
     close_plot = close.loc[common_idx]
     regime_plot = regime.loc[common_idx]
@@ -183,15 +212,43 @@ for config_name, result in all_results.items():
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
     
     plt.tight_layout()
-    output_path = f"hmm_analysis/hmm_regime_analysis_{config_name.lower()}.png"
+    output_path = f"hmm_analysis/hmm_regime_analysis_{config_name.lower().replace(' ', '_')}.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"  ✓ Saved: {output_path}")
     plt.close()
 
 print(f"\n{'='*80}")
 print("ANALYSIS COMPLETE")
+print(f"{'Config':<30} {'Method':<15} {'Time(s)':<10} {'Sharpe':<10} {'Return':<12} {'Switches':<10}")
+print(f"{'-'*100}")
+for config_name, result in all_results.items():
+    base_name = config_name.replace('_forward', '').replace('_predict_proba', '')
+    method = result.get('method', 'forward').replace('_', ' ').title()
+    time_val = result.get('elapsed_time', 0)
+    print(f"{base_name:<30} {method:<15} {time_val:<10.2f} {result['sharpe']:<10.3f} {result['total_return']*100:<12.2f}% {result['switches_count']:<10}")
+
+print(f"\n{'='*80}")
+print("COMPARISON: Forward vs Predict Proba")
 print(f"{'='*80}")
-print("\nPerformance Summary:")
+# Group by base config name
+configs_base = set(c.replace('_forward', '').replace('_predict_proba', '') for c in all_results.keys())
+for base_config in sorted(configs_base):
+    forward_key = base_config + "_forward"
+    predict_key = base_config + "_predict_proba"
+    
+    if forward_key in all_results and predict_key in all_results:
+        forward_result = all_results[forward_key]
+        predict_result = all_results[predict_key]
+        
+        time_diff = predict_result['elapsed_time'] - forward_result['elapsed_time']
+        time_ratio = predict_result['elapsed_time'] / forward_result['elapsed_time'] if forward_result['elapsed_time'] > 0 else 0
+        sharpe_diff = predict_result['sharpe'] - forward_result['sharpe']
+        
+        print(f"\n{base_config}:")
+        print(f"  Time: Forward={forward_result['elapsed_time']:.2f}s, Predict={predict_result['elapsed_time']:.2f}s (Δ={time_diff:+.2f}s, {time_ratio:.2f}x)")
+        print(f"  Sharpe: Forward={forward_result['sharpe']:.3f}, Predict={predict_result['sharpe']:.3f} (Δ={sharpe_diff:+.3f})")
+        print(f"  Switches: Forward={forward_result['switches_count']}, Predict={predict_result['switches_count']}")
+
 for config_name, result in all_results.items():
     print(f"{config_name}: Sharpe={result['sharpe']:.3f}, Return={result['total_return']*100:.2f}%, Switches={result['switches_count']}")
 print(f"\nFiles saved to: hmm_analysis/")

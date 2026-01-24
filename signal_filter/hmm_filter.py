@@ -407,3 +407,85 @@ class HMMRegimeFilter:
         print(f"  Complete! Detected {len(switches)} regime switches")
         
         return probs, regime, switches
+    
+    def walkforward_filter_predict_proba(self, close: pd.Series, 
+                                        train_window: int = 504,
+                                        vol_window: int = 20,
+                                        refit_every: int = 21) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
+        """
+        Walk-forward regime detection using predict_proba (simpler but slower).
+        
+        This version uses the library's predict_proba() function instead of manual
+        forward algorithm. It's simpler but less efficient due to redundant computation.
+        
+        Parameters:
+        -----------
+        close : pd.Series
+            Close prices
+        train_window : int
+            Initial training window size
+        vol_window : int
+            Window for volatility calculation
+        refit_every : int
+            Refit model every N periods
+            
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.Series, pd.Series]
+            (probabilities, regime, switches)
+        """
+        # Create features
+        feats = self.make_features(close, vol_window=vol_window)
+        
+        # Check if we have enough data
+        if len(feats) < train_window:
+            print(f"  Warning: Not enough data ({len(feats)} < {train_window}). Using all data for initial training.")
+            train_window = max(60, len(feats) // 2)
+            print(f"  Adjusted training window: {train_window}")
+        
+        prob_list = []
+        time_list = []
+        
+        temp_model = None
+        temp_scaler = StandardScaler()
+        
+        print(f"Running walk-forward HMM regime detection (using predict_proba)...")
+        print(f"  Training window: {train_window}, Refit every: {refit_every}")
+        
+        for t in range(train_window, len(feats)):
+            # Refit periodically
+            if temp_model is None or ((t - train_window) % refit_every == 0):
+                X_train = feats.iloc[t - train_window : t].values
+                X_train_scaled = temp_scaler.fit_transform(X_train)
+                
+                temp_model = GaussianHMM(
+                    n_components=self.n_states,
+                    covariance_type=self.covariance_type,
+                    n_iter=self.n_iter,
+                    random_state=self.random_state,
+                    verbose=False
+                )
+                temp_model.fit(X_train_scaled)
+                
+                if (t - train_window) % (refit_every * 10) == 0:
+                    print(f"    Progress: {t}/{len(feats)} ({100*t/len(feats):.1f}%)")
+            
+            # Use predict_proba on data up to t (inclusive)
+            X_upto = feats.iloc[: t + 1].values
+            X_upto_scaled = temp_scaler.transform(X_upto)
+            
+            # Get probabilities for all timesteps up to t
+            probs_upto = temp_model.predict_proba(X_upto_scaled)
+            
+            # Take only the probability for time t (last row)
+            prob_t = probs_upto[-1]
+            prob_list.append(prob_t)
+            time_list.append(feats.index[t])
+        
+        probs = pd.DataFrame(prob_list, index=time_list, columns=list(range(self.n_states)))
+        regime = self.detect_regime_switches(probs, enter_th=0.7, exit_th=0.55, confirm_k=2)
+        switches = regime[regime.ne(regime.shift(1))].dropna()
+        
+        print(f"  Complete! Detected {len(switches)} regime switches")
+        
+        return probs, regime, switches
