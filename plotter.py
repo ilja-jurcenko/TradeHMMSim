@@ -13,6 +13,132 @@ class BacktestPlotter:
     """
     
     @staticmethod
+    def plot_4state_strategy(results: dict, close: pd.Series, figsize: tuple = (14, 8), save_path: str = None) -> None:
+        """
+        Plot alpha_hmm_combine strategy with 4-state visualization.
+        
+        Shows equity price colored by the 4 states:
+        - State 1: Low variance + Bullish (green) → BUY
+        - State 2: Low variance + Bearish (yellow) → HOLD
+        - State 3: High variance + Bullish (orange) → HOLD
+        - State 4: High variance + Bearish (red) → SELL
+        
+        Parameters:
+        -----------
+        results : dict
+            Backtest results dictionary from BacktestEngine with state information
+        close : pd.Series
+            Close price series
+        figsize : tuple
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save the figure. If None, displays the plot.
+        """
+        if 'state_labels' not in results:
+            print("Warning: No state information found in results. This plot is only for alpha_hmm_combine strategy.")
+            return
+        
+        fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+        
+        # Extract data
+        state_1 = results['state_1']
+        state_2 = results['state_2']
+        state_3 = results['state_3']
+        state_4 = results['state_4']
+        
+        # Align close prices with state indices
+        common_idx = state_1.index.intersection(close.index)
+        close_aligned = close.loc[common_idx]
+        
+        # Color mapping
+        state_colors = {
+            'State 1': '#2ecc71',  # Green - BUY signal
+            'State 2': '#f1c40f',  # Yellow - HOLD (low var, bearish)
+            'State 3': '#e67e22',  # Orange - HOLD (high var, bullish)
+            'State 4': '#e74c3c'   # Red - SELL signal
+        }
+        
+        # Plot 1: Equity price colored by states
+        ax1 = axes[0]
+        
+        # Plot price segments colored by state
+        for i in range(len(close_aligned) - 1):
+            idx = close_aligned.index[i]
+            idx_next = close_aligned.index[i + 1]
+            
+            # Determine color based on state
+            if state_1.loc[idx]:
+                color = state_colors['State 1']
+            elif state_2.loc[idx]:
+                color = state_colors['State 2']
+            elif state_3.loc[idx]:
+                color = state_colors['State 3']
+            elif state_4.loc[idx]:
+                color = state_colors['State 4']
+            else:
+                color = 'gray'
+            
+            ax1.plot([idx, idx_next], 
+                    [close_aligned.iloc[i], close_aligned.iloc[i + 1]], 
+                    color=color, linewidth=1.5, alpha=0.8)
+        
+        ax1.set_ylabel('Equity Price ($)', fontsize=10)
+        ax1.set_title('Equity Price Colored by 4-State Logic', fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend([plt.Line2D([0], [0], color=state_colors['State 1'], linewidth=2),
+                   plt.Line2D([0], [0], color=state_colors['State 2'], linewidth=2),
+                   plt.Line2D([0], [0], color=state_colors['State 3'], linewidth=2),
+                   plt.Line2D([0], [0], color=state_colors['State 4'], linewidth=2)],
+                  ['State 1: Low Var + Bull (BUY)', 
+                   'State 2: Low Var + Bear (HOLD)',
+                   'State 3: High Var + Bull (HOLD)',
+                   'State 4: High Var + Bear (SELL)'],
+                  loc='upper left', fontsize=8)
+        
+        # Plot 2: State timeline
+        ax2 = axes[1]
+        
+        # Create state numeric representation for visualization
+        state_numeric = pd.Series(0, index=common_idx)
+        state_numeric[state_1] = 1
+        state_numeric[state_2] = 2
+        state_numeric[state_3] = 3
+        state_numeric[state_4] = 4
+        
+        # Plot state timeline as colored bars
+        for i in range(len(state_numeric)):
+            idx = state_numeric.index[i]
+            state_val = state_numeric.iloc[i]
+            
+            if state_val == 1:
+                color = state_colors['State 1']
+            elif state_val == 2:
+                color = state_colors['State 2']
+            elif state_val == 3:
+                color = state_colors['State 3']
+            elif state_val == 4:
+                color = state_colors['State 4']
+            else:
+                color = 'gray'
+            
+            ax2.axvline(x=idx, color=color, alpha=0.6, linewidth=0.5)
+        
+        ax2.set_ylabel('State', fontsize=10)
+        ax2.set_xlabel('Date', fontsize=10)
+        ax2.set_title('State Timeline', fontsize=12, fontweight='bold')
+        ax2.set_yticks([1, 2, 3, 4])
+        ax2.set_yticklabels(['State 1\n(BUY)', 'State 2\n(HOLD)', 'State 3\n(HOLD)', 'State 4\n(SELL)'], fontsize=8)
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            print(f"4-state plot saved to {save_path}")
+        else:
+            plt.show()
+    
+    @staticmethod
     def plot_results(results: dict, close: pd.Series, figsize: tuple = (14, 12), save_path: str = None) -> None:
         """
         Plot comprehensive backtest results with 4 subplots.
@@ -58,31 +184,31 @@ class BacktestPlotter:
         equity = results['equity_curve']
         initial_capital = results.get('initial_capital', 100000)
         
-        # Strategy cumulative return
-        strategy_cum = equity / initial_capital
+        # Strategy cumulative return as percentage
+        strategy_cum = (equity / initial_capital - 1) * 100
         
-        # Benchmark cumulative return (Buy & Hold)
+        # Benchmark cumulative return (Buy & Hold) as percentage
         if 'close_prices' in results:
             close_prices = results['close_prices']
             # Align with strategy index
             common_idx = strategy_cum.index
             close_aligned = close_prices.loc[common_idx]
-            # Calculate buy and hold cumulative return
-            benchmark_cum = close_aligned / close_aligned.iloc[0]
+            # Calculate buy and hold cumulative return as percentage
+            benchmark_cum = (close_aligned / close_aligned.iloc[0] - 1) * 100
         else:
             # Fallback if close_prices not available
-            benchmark_cum = pd.Series([1] * len(equity), index=equity.index)
+            benchmark_cum = pd.Series([0] * len(equity), index=equity.index)
         
         ax.plot(strategy_cum.index, strategy_cum.values, 
                 label='Strategy', color='blue', linewidth=2)
         ax.plot(benchmark_cum.index, benchmark_cum.values, 
                 label='Buy & Hold', color='gray', linewidth=2, alpha=0.7)
         
-        ax.set_ylabel('Cumulative Return', fontsize=12)
+        ax.set_ylabel('Cumulative Return (%)', fontsize=12)
         ax.set_title('Strategy vs Benchmark Performance', fontsize=14, fontweight='bold')
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
-        ax.axhline(y=1, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
     
     @staticmethod
     def _plot_price_and_signals(ax, results: dict, close: pd.Series) -> None:
@@ -318,16 +444,16 @@ class BacktestPlotter:
         for results, label in zip(results_list, labels):
             equity = results['equity_curve']
             initial_capital = results.get('initial_capital', 100000)
-            cum_return = equity / initial_capital
+            cum_return = (equity / initial_capital - 1) * 100
             ax1.plot(cum_return.index, cum_return.values, 
                     label=label, linewidth=2, alpha=0.8)
         
-        ax1.set_ylabel('Cumulative Return', fontsize=12)
+        ax1.set_ylabel('Cumulative Return (%)', fontsize=12)
         ax1.set_title('Strategy Comparison - Equity Curves', 
                      fontsize=14, fontweight='bold')
         ax1.legend(loc='best')
         ax1.grid(True, alpha=0.3)
-        ax1.axhline(y=1, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax1.axhline(y=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
         
         # Plot 2: Drawdowns
         ax2 = axes[1]
