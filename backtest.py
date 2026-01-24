@@ -277,29 +277,77 @@ class BacktestEngine:
                 positions = alpha_signals_aligned * bear_filter
                 
             elif strategy_mode == 'alpha_hmm_combine':
-                # Alpha + HMM combine: "Buy low" contrarian strategy
-                # Core idea: Use HMM to detect regime changes early
+                # Alpha + HMM combine: 4-State Variance-Trend Strategy
                 # 
-                # Strategy:
-                #   1. Follow alpha signals (trend-following base)
-                #   2. ADD contrarian entries: When alpha says no position but HMM predicts bull
-                #      -> Buy the dip before trend turns
-                #   3. DON'T do contrarian exits (too aggressive, cuts winning trades early)
+                # Combines HMM (market variance/regime) with Alpha (trend direction):
+                #   - HMM detects variance: Low (bull/neutral prob > threshold) vs High (bear prob > threshold)
+                #   - Alpha detects trend: Bullish vs Bearish
                 #
-                # This creates asymmetry: Enter early, exit normally
+                # Four States:
+                #   State 1: Low variance + Bullish trend  → BUY (if not in position)
+                #   State 2: Low variance + Bearish trend  → HOLD (no action)
+                #   State 3: High variance + Bullish trend → HOLD (no action)
+                #   State 4: High variance + Bearish trend → SELL (if in position)
+                #
+                # Trading Logic:
+                #   - Enter long only in State 1 (safe bull market)
+                #   - Exit long only in State 4 (dangerous bear market)
+                #   - All other states: maintain current position
                 
-                # Detect strong bull regime prediction
-                hmm_bull_signal = (bull_prob_combined > bull_prob_threshold).astype(bool)
+                # Detect variance regimes
+                low_variance = (bull_prob_combined > bull_prob_threshold).astype(bool)
+                high_variance = (bear_prob > bear_prob_threshold).astype(bool)
                 
-                # Start with alpha signals as base
-                positions = alpha_signals_aligned.astype(bool).copy()
+                # Detect trend direction (alpha signals: 1=bullish, 0/negative=bearish)
+                bullish_trend = (alpha_signals_aligned > 0).astype(bool)
+                bearish_trend = ~bullish_trend
                 
-                # Contrarian ENTRY ONLY: Alpha says no position, but HMM predicts bull -> BUY THE DIP
-                # This catches early regime shifts when trend hasn't turned yet
-                contrarian_entry = (~alpha_signals_aligned.astype(bool)) & hmm_bull_signal
-                positions[contrarian_entry] = True
+                # Define the 4 states
+                state_1 = low_variance & bullish_trend   # Low variance + Bullish → BUY signal
+                state_2 = low_variance & bearish_trend   # Low variance + Bearish → HOLD
+                state_3 = high_variance & bullish_trend  # High variance + Bullish → HOLD
+                state_4 = high_variance & bearish_trend  # High variance + Bearish → SELL signal
                 
-                positions = positions.astype(int)
+                # Create state labels for each period (for visualization)
+                state_labels = pd.Series('Unknown', index=common_idx)
+                state_labels[state_1] = 'State 1: Low Var + Bull'
+                state_labels[state_2] = 'State 2: Low Var + Bear'
+                state_labels[state_3] = 'State 3: High Var + Bull'
+                state_labels[state_4] = 'State 4: High Var + Bear'
+                
+                # Initialize positions array
+                positions = pd.Series(0, index=common_idx, dtype=int)
+                
+                # State machine: track position and respond to state transitions
+                current_position = 0  # Start flat
+                for i in range(len(common_idx)):
+                    # Check state and update position
+                    if state_1.iloc[i] and current_position == 0:
+                        # State 1: Enter long if not in position
+                        current_position = 1
+                    elif state_4.iloc[i] and current_position == 1:
+                        # State 4: Exit long if in position
+                        current_position = 0
+                    # All other states: maintain current position
+                    
+                    positions.iloc[i] = current_position
+                
+                # Store state information for plotting
+                self.state_labels = state_labels
+                self.state_1 = state_1
+                self.state_2 = state_2
+                self.state_3 = state_3
+                self.state_4 = state_4
+                
+                # Log state transitions for diagnostics
+                num_state1 = state_1.sum()
+                num_state2 = state_2.sum()
+                num_state3 = state_3.sum()
+                num_state4 = state_4.sum()
+                print(f"  State 1 (Low var + Bull): {num_state1} periods")
+                print(f"  State 2 (Low var + Bear): {num_state2} periods")
+                print(f"  State 3 (High var + Bull): {num_state3} periods")
+                print(f"  State 4 (High var + Bear): {num_state4} periods")
             
             elif strategy_mode == 'regime_adaptive_alpha':
                 # Regime-Adaptive Alpha: Switch strategies based on market regime
@@ -406,6 +454,14 @@ class BacktestEngine:
             results['regime_probs'] = self.regime_probs
             results['regime'] = self.regime
             results['regime_info'] = self.regime_info
+        
+        # Add state information for alpha_hmm_combine strategy
+        if hasattr(self, 'state_labels'):
+            results['state_labels'] = self.state_labels
+            results['state_1'] = self.state_1
+            results['state_2'] = self.state_2
+            results['state_3'] = self.state_3
+            results['state_4'] = self.state_4
         
         print(f"\n{'='*60}")
         print("BACKTEST COMPLETE")
