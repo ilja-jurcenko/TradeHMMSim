@@ -35,7 +35,8 @@ def run_comparison(ticker = None,
                    refit_every: int = 21,
                    bear_prob_threshold: float = 0.65,
                    bull_prob_threshold: float = 0.65,
-                   use_regime_rebalancing: bool = True):
+                   use_regime_rebalancing: bool = True,
+                   enable_logging: bool = False):
     """
     Run comprehensive comparison of AlphaModels with and without HMM filtering.
     
@@ -74,6 +75,8 @@ def run_comparison(ticker = None,
     use_regime_rebalancing : bool
         Whether to use regime-based portfolio rebalancing for multi-asset portfolios.
         When True with HMM strategies, automatically shifts between SPY (bull/neutral) and AGG (bear).
+    enable_logging : bool
+        Enable detailed CSV logging of trading decisions for each strategy
         
     Returns:
     --------
@@ -162,6 +165,13 @@ def run_comparison(ticker = None,
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nOutput directory: {output_dir}")
     
+    # Create subdirectory for logs if logging enabled
+    log_dir = None
+    if enable_logging:
+        log_dir = os.path.join(output_dir, 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        print(f"Logging directory: {log_dir}")
+    
     # Create subdirectory for individual plots
     if save_plots:
         plots_dir = os.path.join(output_dir, 'individual_plots')
@@ -221,7 +231,9 @@ def run_comparison(ticker = None,
         results_alpha = engine_alpha.run(
             strategy_mode='alpha_only',
             rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
         )
         
         # Save individual plot
@@ -259,7 +271,9 @@ def run_comparison(ticker = None,
             bear_prob_threshold=bear_prob_threshold,
             bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
         )
         
         # Save individual plot
@@ -297,7 +311,9 @@ def run_comparison(ticker = None,
             bear_prob_threshold=bear_prob_threshold,
             bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
         )
         
         # Save individual plot
@@ -335,7 +351,9 @@ def run_comparison(ticker = None,
             bear_prob_threshold=bear_prob_threshold,
             bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
         )
         
         # Save individual plot
@@ -382,7 +400,9 @@ def run_comparison(ticker = None,
             bear_prob_threshold=bear_prob_threshold,
             bull_prob_threshold=bull_prob_threshold,
             rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
         )
         
         # Save individual plot
@@ -690,11 +710,14 @@ if __name__ == '__main__':
     # Check for output directory argument
     output_dir = None
     save_plots_flag = False
+    enable_logging_flag = False
     for i, arg in enumerate(sys.argv):
         if arg == '--output-dir' and i + 1 < len(sys.argv):
             output_dir = sys.argv[i + 1]
         if arg == '--save-plots':
             save_plots_flag = True
+        if arg == '--enable-logging' or arg == '--log':
+            enable_logging_flag = True
     
     # Run comparison
     results, output_directory = run_comparison(
@@ -707,7 +730,8 @@ if __name__ == '__main__':
         transaction_cost=0.001,
         output_dir=output_dir,
         save_plots=save_plots_flag or show_plots,
-        config_path=config_path
+        config_path=config_path,
+        enable_logging=enable_logging_flag
     )
     
     print("\n" + "="*80)

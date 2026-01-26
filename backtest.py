@@ -4,6 +4,8 @@ Backtest simulation engine with walk-forward testing and rebalancing.
 
 import pandas as pd
 import numpy as np
+import os
+from datetime import datetime
 from typing import Optional, Dict, List, Union, Any
 from alpha_models.base import AlphaModel
 from signal_filter.hmm_filter import HMMRegimeFilter
@@ -169,7 +171,9 @@ class BacktestEngine:
             refit_every: int = 21,
             bear_prob_threshold: float = 0.65,
             bull_prob_threshold: float = 0.65,
-            transaction_cost: float = 0.0) -> Dict:
+            transaction_cost: float = 0.0,
+            enable_logging: bool = False,
+            log_dir: str = 'logs') -> Dict:
         """
         Run backtest simulation.
         
@@ -196,6 +200,10 @@ class BacktestEngine:
             Bull regime probability threshold for entry override
         transaction_cost : float
             Transaction cost per trade (as fraction, e.g., 0.001 = 0.1%)
+        enable_logging : bool
+            Enable detailed logging of trading decisions
+        log_dir : str
+            Directory to save log files
             
         Returns:
         --------
@@ -210,11 +218,23 @@ class BacktestEngine:
         print(f"Rebalance Frequency: {rebalance_frequency} period(s)")
         print(f"Transaction Cost: {transaction_cost*100:.3f}%")
         
+        # Setup logging if enabled
+        log_file = None
+        if enable_logging:
+            os.makedirs(log_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_filename = f"{strategy_mode}_{self.alpha_model.get_name()}_{timestamp}.csv"
+            log_file = os.path.join(log_dir, log_filename)
+            print(f"Logging enabled: {log_file}")
+        
         # Generate alpha signals
         alpha_signals = self.alpha_model.generate_signals(self.close)
         
         # Apply finite state machine logic to validate transitions
         positions = self._apply_fsm_logic(alpha_signals)
+        
+        # Initialize logging data structure
+        log_data = [] if enable_logging else None
         
         # Apply HMM filtering if needed
         if strategy_mode != 'alpha_only' and self.hmm_filter is not None:
@@ -271,10 +291,48 @@ class BacktestEngine:
                 # Use combined bull+neutral probability
                 positions = (bull_prob_combined > bull_prob_threshold).astype(int)
                 
+                # Log decisions
+                if enable_logging:
+                    for i, idx in enumerate(common_idx):
+                        prev_pos = 0 if i == 0 else positions.iloc[i-1]
+                        curr_pos = positions.iloc[i]
+                        action = self._determine_action(prev_pos, curr_pos)
+                        
+                        log_data.append({
+                            'Date': idx,
+                            'Price': self.close.loc[idx],
+                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
+                            'Bear_Prob': bear_prob.iloc[i],
+                            'Bull_Prob': bull_prob.iloc[i],
+                            'Bull_Combined_Prob': bull_prob_combined.iloc[i],
+                            'HMM_Signal': 1 if bull_prob_combined.iloc[i] > bull_prob_threshold else 0,
+                            'Position': curr_pos,
+                            'Action': action
+                        })
+                
             elif strategy_mode == 'alpha_hmm_filter':
                 # Alpha + HMM filter: HMM only filters out during bear regime
                 bear_filter = (bear_prob < bear_prob_threshold).astype(int)
                 positions = alpha_signals_aligned * bear_filter
+                
+                # Log decisions
+                if enable_logging:
+                    for i, idx in enumerate(common_idx):
+                        prev_pos = 0 if i == 0 else positions.iloc[i-1]
+                        curr_pos = positions.iloc[i]
+                        action = self._determine_action(prev_pos, curr_pos)
+                        
+                        log_data.append({
+                            'Date': idx,
+                            'Price': self.close.loc[idx],
+                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
+                            'Bear_Prob': bear_prob.iloc[i],
+                            'Bull_Prob': bull_prob.iloc[i],
+                            'Bear_Filter': bear_filter.iloc[i],
+                            'HMM_Signal': 0 if bear_prob.iloc[i] >= bear_prob_threshold else 1,
+                            'Position': curr_pos,
+                            'Action': action
+                        })
                 
             elif strategy_mode == 'alpha_hmm_combine':
                 # Alpha + HMM combine: 4-State Variance-Trend Strategy
@@ -321,6 +379,9 @@ class BacktestEngine:
                 # State machine: track position and respond to state transitions
                 current_position = 0  # Start flat
                 for i in range(len(common_idx)):
+                    idx = common_idx[i]
+                    prev_position = current_position
+                    
                     # Check state and update position
                     if state_1.iloc[i] and current_position == 0:
                         # State 1: Enter long if not in position
@@ -331,6 +392,36 @@ class BacktestEngine:
                     # All other states: maintain current position
                     
                     positions.iloc[i] = current_position
+                    
+                    # Log decisions
+                    if enable_logging:
+                        # Determine which state
+                        if state_1.iloc[i]:
+                            state_label = 'State_1_Low_Var_Bull'
+                        elif state_2.iloc[i]:
+                            state_label = 'State_2_Low_Var_Bear'
+                        elif state_3.iloc[i]:
+                            state_label = 'State_3_High_Var_Bull'
+                        elif state_4.iloc[i]:
+                            state_label = 'State_4_High_Var_Bear'
+                        else:
+                            state_label = 'Unknown'
+                        
+                        action = self._determine_action(prev_position, current_position)
+                        
+                        log_data.append({
+                            'Date': idx,
+                            'Price': self.close.loc[idx],
+                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
+                            'Bear_Prob': bear_prob.iloc[i],
+                            'Bull_Prob': bull_prob.iloc[i],
+                            'Bull_Combined_Prob': bull_prob_combined.iloc[i],
+                            'Low_Variance': low_variance.iloc[i],
+                            'High_Variance': high_variance.iloc[i],
+                            'State': state_label,
+                            'Position': current_position,
+                            'Action': action
+                        })
                 
                 # Store state information for plotting
                 self.state_labels = state_labels
@@ -374,13 +465,31 @@ class BacktestEngine:
                 for i in range(len(common_idx)):
                     idx = common_idx[i]
                     current_regime = regime.loc[idx]
+                    prev_pos = 0 if i == 0 else positions.iloc[i-1]
                     
                     if current_regime == 'bear':
                         # Use bear market strategy (mean-reversion)
                         positions.iloc[i] = bear_signals_aligned.iloc[i]
+                        active_model = 'Bear_Alpha'
                     else:
                         # Use bull/neutral market strategy (trend-following)
                         positions.iloc[i] = alpha_signals_aligned.iloc[i]
+                        active_model = 'Bull_Alpha'
+                    
+                    # Log decisions
+                    if enable_logging:
+                        action = self._determine_action(prev_pos, positions.iloc[i])
+                        
+                        log_data.append({
+                            'Date': idx,
+                            'Price': self.close.loc[idx],
+                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
+                            'Bear_Signal': bear_signals_aligned.iloc[i],
+                            'Regime': current_regime,
+                            'Active_Model': active_model,
+                            'Position': positions.iloc[i],
+                            'Action': action
+                        })
                 
                 print(f"  Regime switches - Trend-following: {(regime != 'bear').sum()} periods, "
                       f"Mean-reversion: {(regime == 'bear').sum()} periods")
@@ -394,6 +503,22 @@ class BacktestEngine:
         if rebalance_frequency > 1:
             print(f"\nApplying rebalancing frequency: {rebalance_frequency}")
             positions = self._apply_rebalancing(positions, rebalance_frequency)
+        
+        # Log alpha_only strategy decisions
+        if enable_logging and strategy_mode == 'alpha_only':
+            for i in range(len(positions)):
+                idx = positions.index[i]
+                prev_pos = 0 if i == 0 else positions.iloc[i-1]
+                curr_pos = positions.iloc[i]
+                action = self._determine_action(prev_pos, curr_pos)
+                
+                log_data.append({
+                    'Date': idx,
+                    'Price': self.close.loc[idx],
+                    'Alpha_Signal': alpha_signals.loc[idx],
+                    'Position': curr_pos,
+                    'Action': action
+                })
         
         # Calculate returns
         price_returns = self.close.pct_change().fillna(0)
@@ -414,6 +539,14 @@ class BacktestEngine:
         
         # Calculate equity curve
         equity_curve = self.initial_capital * (1 + strategy_returns).cumprod()
+        
+        # Add portfolio value to log data
+        if enable_logging and log_data:
+            for i, entry in enumerate(log_data):
+                if entry['Date'] in equity_curve.index:
+                    entry['Portfolio_Value'] = equity_curve.loc[entry['Date']]
+                else:
+                    entry['Portfolio_Value'] = self.initial_capital
         
         # Calculate metrics (convert to numpy array)
         metrics = Statistics.calculate_all_metrics(strategy_returns.values)
@@ -471,7 +604,47 @@ class BacktestEngine:
         print(f"Final Capital: ${results['final_capital']:,.2f}")
         print(f"Total Return: {metrics['total_return']*100:.2f}%")
         
+        # Write log file
+        if enable_logging and log_data and log_file:
+            log_df = pd.DataFrame(log_data)
+            log_df.to_csv(log_file, index=False)
+            print(f"\n✓ Log file saved: {log_file}")
+            print(f"  Total entries: {len(log_df)}")
+        
         return results
+    
+    def _determine_action(self, prev_position: int, curr_position: int) -> str:
+        """
+        Determine trading action based on position change.
+        
+        Parameters:
+        -----------
+        prev_position : int
+            Previous position (-1, 0, or 1)
+        curr_position : int
+            Current position (-1, 0, or 1)
+            
+        Returns:
+        --------
+        str
+            Action taken: BUY, SELL, SHORT, COVER, or HOLD
+        """
+        if prev_position == curr_position:
+            return 'HOLD'
+        elif prev_position == 0 and curr_position == 1:
+            return 'BUY'
+        elif prev_position == 1 and curr_position == 0:
+            return 'SELL'
+        elif prev_position == 0 and curr_position == -1:
+            return 'SHORT'
+        elif prev_position == -1 and curr_position == 0:
+            return 'COVER'
+        elif prev_position == 1 and curr_position == -1:
+            return 'SELL_AND_SHORT'
+        elif prev_position == -1 and curr_position == 1:
+            return 'COVER_AND_BUY'
+        else:
+            return 'UNKNOWN'
     
     def _apply_fsm_logic(self, signals: pd.Series) -> pd.Series:
         """
