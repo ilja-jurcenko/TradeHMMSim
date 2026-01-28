@@ -378,18 +378,36 @@ class BacktestEngine:
                 
                 # State machine: track position and respond to state transitions
                 current_position = 0  # Start flat
+                # Track previous state for each period
+                prev_state = None  # Assume starting in State 1
+                
                 for i in range(len(common_idx)):
                     idx = common_idx[i]
                     prev_position = current_position
                     
-                    # Check state and update position
-                    if state_1.iloc[i] and current_position == 0:
-                        # State 1: Enter long if not in position
-                        current_position = 1
-                    elif state_4.iloc[i] and current_position == 1:
-                        # State 4: Exit long if in position
-                        current_position = 0
-                    # All other states: maintain current position
+                    # Determine current state
+                    if state_1.iloc[i]:
+                        current_state_num = 1
+                    elif state_2.iloc[i]:
+                        current_state_num = 2
+                    elif state_3.iloc[i]:
+                        current_state_num = 3
+                    elif state_4.iloc[i]:
+                        current_state_num = 4
+                    else:
+                        current_state_num = None
+                    
+                    # Detect state transitions and update position
+                    if prev_state is not None and current_state_num is not None:
+                        # State switch from 1 to (2,3,4): SELL
+                        if prev_state in [1,2,3] and current_state_num in [4] and current_position==1:
+                            current_position = 0
+                        # State switch from (2,3,4) to 1: BUY
+                        elif prev_state in [2,3,4] and current_state_num in [1] and current_position==0:
+                            current_position = 1
+                    
+                    # Update prev_state for next iteration
+                    prev_state = current_state_num
                     
                     positions.iloc[i] = current_position
                     

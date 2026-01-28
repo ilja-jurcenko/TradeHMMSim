@@ -97,14 +97,13 @@ def run_comparison(ticker = None,
         config = ConfigLoader.load_config(config_path)
         ConfigLoader.print_config(config)
         
-        # Override parameters with config values
+        # Override parameters with config values (but command-line args take precedence)
+        # Note: start_date and end_date should already be set correctly by caller if provided via CLI
         config_ticker = config.get('data', {}).get('ticker', ticker)
         if isinstance(config_ticker, str):
             ticker = [config_ticker]
         else:
             ticker = config_ticker
-        start_date = config.get('data', {}).get('start_date', start_date)
-        end_date = config.get('data', {}).get('end_date', end_date)
         
         # Check for alpha_models list (new format) or alpha_model (legacy format)
         if 'alpha_models' in config:
@@ -688,50 +687,132 @@ def run_comparison(ticker = None,
 
 
 if __name__ == '__main__':
-    import sys
+    import argparse
     
-    # Check for config file argument first
-    config_path = None
-    for i, arg in enumerate(sys.argv):
-        if arg == '--config' and i + 1 < len(sys.argv):
-            config_path = sys.argv[i + 1]
-            break
+    # Create argument parser
+    parser = argparse.ArgumentParser(
+        description='Run comprehensive comparison of AlphaModels with and without HMM filtering.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with default multi-asset portfolio (SPY, AGG)
+  python run_comparison.py
+  
+  # Run with single ticker
+  python run_comparison.py SPY
+  
+  # Run with multiple tickers
+  python run_comparison.py SPY,AGG
+  
+  # Run with custom date range (overrides config)
+  python run_comparison.py SPY --start-date 2020-01-01 --end-date 2025-12-31
+  
+  # Run with config file
+  python run_comparison.py --config config_optimal.json
+  
+  # Command-line args override config file
+  python run_comparison.py --config config_optimal.json --start-date 2022-01-01
+  
+  # Run with logging and plots
+  python run_comparison.py SPY --enable-logging --save-plots
+        """
+    )
     
-    # Parse command line arguments (config overrides these)
-    ticker = None  # Will default to ['SPY', 'AGG'] in run_comparison
-    if len(sys.argv) > 1 and not sys.argv[1].startswith('--'):
-        # Support comma-separated tickers: SPY,AGG
-        ticker_arg = sys.argv[1]
-        ticker = ticker_arg.split(',') if ',' in ticker_arg else [ticker_arg]
-    start_date = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else '2018-01-01'
-    end_date = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith('--') else '2024-12-31'
-    show_plots = '--plot' in sys.argv or '-p' in sys.argv
+    # Positional argument
+    parser.add_argument(
+        'ticker',
+        nargs='?',
+        default=None,
+        help='Ticker symbol(s) to test. Use comma-separated for multiple (e.g., SPY,AGG). Default: SPY,AGG'
+    )
     
-    # Check for output directory argument
-    output_dir = None
-    save_plots_flag = False
-    enable_logging_flag = False
-    for i, arg in enumerate(sys.argv):
-        if arg == '--output-dir' and i + 1 < len(sys.argv):
-            output_dir = sys.argv[i + 1]
-        if arg == '--save-plots':
-            save_plots_flag = True
-        if arg == '--enable-logging' or arg == '--log':
-            enable_logging_flag = True
+    # Date range arguments
+    parser.add_argument(
+        '--start-date',
+        type=str,
+        default=None,
+        help='Start date for backtest (YYYY-MM-DD). Overrides config file if provided.'
+    )
+    
+    parser.add_argument(
+        '--end-date',
+        type=str,
+        default=None,
+        help='End date for backtest (YYYY-MM-DD). Overrides config file if provided.'
+    )
+    
+    # Configuration
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='Path to configuration JSON file. Command-line args override config values.'
+    )
+    
+    # Output options
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default=None,
+        help='Directory to save results. Default: results/run_<timestamp>'
+    )
+    
+    parser.add_argument(
+        '--save-plots',
+        action='store_true',
+        help='Generate and save plots'
+    )
+    
+    parser.add_argument(
+        '-p', '--plot',
+        action='store_true',
+        help='Alias for --save-plots'
+    )
+    
+    parser.add_argument(
+        '--enable-logging', '--log',
+        action='store_true',
+        help='Enable detailed CSV logging of trading decisions'
+    )
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Process ticker argument
+    ticker = None
+    if args.ticker:
+        ticker = args.ticker.split(',') if ',' in args.ticker else [args.ticker]
+    
+    # Determine final values (command-line args override config)
+    # Start with defaults
+    final_start_date = '2018-01-01'
+    final_end_date = '2024-12-31'
+    
+    # If config provided, load it first
+    if args.config:
+        config = ConfigLoader.load_config(args.config)
+        final_start_date = config.get('data', {}).get('start_date', final_start_date)
+        final_end_date = config.get('data', {}).get('end_date', final_end_date)
+    
+    # Command-line args override config
+    if args.start_date:
+        final_start_date = args.start_date
+    if args.end_date:
+        final_end_date = args.end_date
     
     # Run comparison
     results, output_directory = run_comparison(
         ticker=ticker,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=final_start_date,
+        end_date=final_end_date,
         short_window=10,
         long_window=30,
         rebalance_frequency=1,
         transaction_cost=0.001,
-        output_dir=output_dir,
-        save_plots=save_plots_flag or show_plots,
-        config_path=config_path,
-        enable_logging=enable_logging_flag
+        output_dir=args.output_dir,
+        save_plots=args.save_plots or args.plot,
+        config_path=args.config,
+        enable_logging=args.enable_logging
     )
     
     print("\n" + "="*80)
