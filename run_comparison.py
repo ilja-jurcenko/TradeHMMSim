@@ -36,7 +36,8 @@ def run_comparison(ticker = None,
                    bear_prob_threshold: float = 0.65,
                    bull_prob_threshold: float = 0.65,
                    use_regime_rebalancing: bool = True,
-                   enable_logging: bool = False):
+                   enable_logging: bool = False,
+                   strategies: list = None):
     """
     Run comprehensive comparison of AlphaModels with and without HMM filtering.
     
@@ -77,6 +78,10 @@ def run_comparison(ticker = None,
         When True with HMM strategies, automatically shifts between SPY (bull/neutral) and AGG (bear).
     enable_logging : bool
         Enable detailed CSV logging of trading decisions for each strategy
+    strategies : list, optional
+        List of strategy names to run. If None, runs all strategies.
+        Valid values: ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
+                       'alpha_hmm_combine', 'regime_adaptive_alpha']
         
     Returns:
     --------
@@ -180,6 +185,18 @@ def run_comparison(ticker = None,
     if alpha_models is None:
         alpha_models = [SMA, EMA, WMA, HMA, KAMA, TEMA, ZLEMA]
     
+    # Default strategies
+    if strategies is None:
+        strategies = ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
+                      'alpha_hmm_combine', 'regime_adaptive_alpha']
+    
+    # Validate strategies
+    valid_strategies = ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
+                        'alpha_hmm_combine', 'regime_adaptive_alpha']
+    for strategy in strategies:
+        if strategy not in valid_strategies:
+            raise ValueError(f"Invalid strategy: {strategy}. Valid strategies: {valid_strategies}")
+    
     # Determine if using multi-asset portfolio
     is_multi_asset = len(ticker) > 1
     ticker_str = ', '.join(ticker) if is_multi_asset else ticker[0]
@@ -223,265 +240,283 @@ def run_comparison(ticker = None,
         model = model_class(short_window=model_short, long_window=model_long)
         
         # Strategy 1: Alpha only
-        print(f"\n[1/6] Running {model_name} - Alpha Only...")
-        if is_multi_asset and use_regime_rebalancing:
-            print("  Note: Multi-asset mode without regime rebalancing (static equal weights)")
-        engine_alpha = BacktestEngine(close, model)
-        results_alpha = engine_alpha.run(
-            strategy_mode='alpha_only',
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_Only.png')
-            BacktestPlotter.plot_results(results_alpha, close, save_path=plot_file)
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'Alpha Only',
-            'Total Return (%)': results_alpha['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_alpha['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_alpha['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_alpha['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_alpha['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_alpha['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_alpha['metrics']['profit_factor'],
-            'Win Rate (%)': results_alpha['metrics']['win_rate'] * 100,
-            'Num Trades': results_alpha['num_trades'],
-            'Time in Market (%)': results_alpha['time_in_market'] * 100
-        })
+        if 'alpha_only' not in strategies:
+            print(f"\n[1/6] Skipping {model_name} - Alpha Only...")
+        else:
+            print(f"\n[1/6] Running {model_name} - Alpha Only...")
+            if is_multi_asset and use_regime_rebalancing:
+                print("  Note: Multi-asset mode without regime rebalancing (static equal weights)")
+            engine_alpha = BacktestEngine(close, model)
+            results_alpha = engine_alpha.run(
+                strategy_mode='alpha_only',
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
+            )
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_Only.png')
+                BacktestPlotter.plot_results(results_alpha, close, save_path=plot_file)
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Alpha Only',
+                'Total Return (%)': results_alpha['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_alpha['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_alpha['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_alpha['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_alpha['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_alpha['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_alpha['metrics']['profit_factor'],
+                'Win Rate (%)': results_alpha['metrics']['win_rate'] * 100,
+                'Num Trades': results_alpha['num_trades'],
+                'Time in Market (%)': results_alpha['time_in_market'] * 100
+            })
         
         # Strategy 2: HMM only
-        print(f"\n[2/6] Running {model_name} - HMM Only...")
-        if is_multi_asset and use_regime_rebalancing:
-            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-        hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
-        results_hmm = engine_hmm.run(
-            strategy_mode='hmm_only',
-            walk_forward=True,
-            train_window=train_window,
-            refit_every=refit_every,
-            bear_prob_threshold=bear_prob_threshold,
-            bull_prob_threshold=bull_prob_threshold,
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_HMM_Only.png')
-            BacktestPlotter.plot_results(results_hmm, close, save_path=plot_file)
-            plt.close('all')
-            
-            # Save regime-colored equity plot
-            plot_file_regime = os.path.join(plots_dir, f'{model_name}_HMM_Only_Regime_Colored.png')
-            BacktestPlotter.plot_hmm_regime_colored_equity(
-                results_hmm, close, 
-                bear_threshold=bear_prob_threshold,
-                bull_threshold=bull_prob_threshold,
-                save_path=plot_file_regime
+        if 'hmm_only' not in strategies:
+            print(f"\n[2/6] Skipping {model_name} - HMM Only...")
+        else:
+            print(f"\n[2/6] Running {model_name} - HMM Only...")
+            if is_multi_asset and use_regime_rebalancing:
+                print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+            results_hmm = engine_hmm.run(
+                strategy_mode='hmm_only',
+                walk_forward=True,
+                train_window=train_window,
+                refit_every=refit_every,
+                bear_prob_threshold=bear_prob_threshold,
+                bull_prob_threshold=bull_prob_threshold,
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
             )
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'HMM Only',
-            'Total Return (%)': results_hmm['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_hmm['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_hmm['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_hmm['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_hmm['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_hmm['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_hmm['metrics']['profit_factor'],
-            'Win Rate (%)': results_hmm['metrics']['win_rate'] * 100,
-            'Num Trades': results_hmm['num_trades'],
-            'Time in Market (%)': results_hmm['time_in_market'] * 100
-        })
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_HMM_Only.png')
+                BacktestPlotter.plot_results(results_hmm, close, save_path=plot_file)
+                plt.close('all')
+                
+                # Save regime-colored equity plot
+                plot_file_regime = os.path.join(plots_dir, f'{model_name}_HMM_Only_Regime_Colored.png')
+                BacktestPlotter.plot_hmm_regime_colored_equity(
+                    results_hmm, close, 
+                    bear_threshold=bear_prob_threshold,
+                    bull_threshold=bull_prob_threshold,
+                    save_path=plot_file_regime
+                )
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'HMM Only',
+                'Total Return (%)': results_hmm['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_hmm['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_hmm['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_hmm['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_hmm['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_hmm['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_hmm['metrics']['profit_factor'],
+                'Win Rate (%)': results_hmm['metrics']['win_rate'] * 100,
+                'Num Trades': results_hmm['num_trades'],
+                'Time in Market (%)': results_hmm['time_in_market'] * 100
+            })
         
         # Strategy 3: Oracle (HMM-Only with all data, no walk-forward)
-        print(f"\n[3/6] Running {model_name} - Oracle (HMM-Only)...")
-        print("  ⚠️  Oracle mode: Fits HMM on entire dataset (upper bound with future knowledge)")
-        if is_multi_asset and use_regime_rebalancing:
-            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-        hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle)
-        results_oracle = engine_oracle.run(
-            strategy_mode='oracle',
-            bear_prob_threshold=bear_prob_threshold,
-            bull_prob_threshold=bull_prob_threshold,
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_Oracle.png')
-            BacktestPlotter.plot_results(results_oracle, close, save_path=plot_file)
-            plt.close('all')
-            
-            # Save regime-colored equity plot
-            plot_file_regime = os.path.join(plots_dir, f'{model_name}_Oracle_Regime_Colored.png')
-            BacktestPlotter.plot_hmm_regime_colored_equity(
-                results_oracle, close, 
-                bear_threshold=bear_prob_threshold,
-                bull_threshold=bull_prob_threshold,
-                save_path=plot_file_regime
+        if 'oracle' not in strategies:
+            print(f"\n[3/6] Skipping {model_name} - Oracle (HMM-Only)...")
+        else:
+            print(f"\n[3/6] Running {model_name} - Oracle (HMM-Only)...")
+            print("  ⚠️  Oracle mode: Fits HMM on entire dataset (upper bound with future knowledge)")
+            if is_multi_asset and use_regime_rebalancing:
+                print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
+            hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42)
+            engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle)
+            results_oracle = engine_oracle.run(
+                strategy_mode='oracle',
+                bear_prob_threshold=bear_prob_threshold,
+                bull_prob_threshold=bull_prob_threshold,
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
             )
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'Oracle',
-            'Total Return (%)': results_oracle['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_oracle['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_oracle['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_oracle['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_oracle['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_oracle['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_oracle['metrics']['profit_factor'],
-            'Win Rate (%)': results_oracle['metrics']['win_rate'] * 100,
-            'Num Trades': results_oracle['num_trades'],
-            'Time in Market (%)': results_oracle['time_in_market'] * 100
-        })
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Oracle.png')
+                BacktestPlotter.plot_results(results_oracle, close, save_path=plot_file)
+                plt.close('all')
+                
+                # Save regime-colored equity plot
+                plot_file_regime = os.path.join(plots_dir, f'{model_name}_Oracle_Regime_Colored.png')
+                BacktestPlotter.plot_hmm_regime_colored_equity(
+                    results_oracle, close, 
+                    bear_threshold=bear_prob_threshold,
+                    bull_threshold=bull_prob_threshold,
+                    save_path=plot_file_regime
+                )
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Oracle',
+                'Total Return (%)': results_oracle['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_oracle['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_oracle['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_oracle['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_oracle['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_oracle['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_oracle['metrics']['profit_factor'],
+                'Win Rate (%)': results_oracle['metrics']['win_rate'] * 100,
+                'Num Trades': results_oracle['num_trades'],
+                'Time in Market (%)': results_oracle['time_in_market'] * 100
+            })
         
         # Strategy 4: Alpha + HMM Filter
-        print(f"\n[4/6] Running {model_name} - Alpha + HMM Filter...")
-        if is_multi_asset and use_regime_rebalancing:
-            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-        hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
-        results_filter = engine_filter.run(
-            strategy_mode='alpha_hmm_filter',
-            walk_forward=True,
-            train_window=train_window,
-            refit_every=refit_every,
-            bear_prob_threshold=bear_prob_threshold,
-            bull_prob_threshold=bull_prob_threshold,
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Filter.png')
-            BacktestPlotter.plot_results(results_filter, close, save_path=plot_file)
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'Alpha + HMM Filter',
-            'Total Return (%)': results_filter['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_filter['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_filter['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_filter['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_filter['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_filter['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_filter['metrics']['profit_factor'],
-            'Win Rate (%)': results_filter['metrics']['win_rate'] * 100,
-            'Num Trades': results_filter['num_trades'],
-            'Time in Market (%)': results_filter['time_in_market'] * 100
-        })
+        if 'alpha_hmm_filter' not in strategies:
+            print(f"\n[4/6] Skipping {model_name} - Alpha + HMM Filter...")
+        else:
+            print(f"\n[4/6] Running {model_name} - Alpha + HMM Filter...")
+            if is_multi_asset and use_regime_rebalancing:
+                print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+            results_filter = engine_filter.run(
+                strategy_mode='alpha_hmm_filter',
+                walk_forward=True,
+                train_window=train_window,
+                refit_every=refit_every,
+                bear_prob_threshold=bear_prob_threshold,
+                bull_prob_threshold=bull_prob_threshold,
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
+            )
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Filter.png')
+                BacktestPlotter.plot_results(results_filter, close, save_path=plot_file)
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Alpha + HMM Filter',
+                'Total Return (%)': results_filter['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_filter['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_filter['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_filter['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_filter['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_filter['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_filter['metrics']['profit_factor'],
+                'Win Rate (%)': results_filter['metrics']['win_rate'] * 100,
+                'Num Trades': results_filter['num_trades'],
+                'Time in Market (%)': results_filter['time_in_market'] * 100
+            })
         
         # Strategy 5: Alpha + HMM Combine
-        print(f"\n[5/6] Running {model_name} - Alpha + HMM Combine...")
-        if is_multi_asset and use_regime_rebalancing:
-            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-        hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
-        results_combine = engine_combine.run(
-            strategy_mode='alpha_hmm_combine',
-            walk_forward=True,
-            train_window=train_window,
-            refit_every=refit_every,
-            bear_prob_threshold=bear_prob_threshold,
-            bull_prob_threshold=bull_prob_threshold,
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine.png')
-            BacktestPlotter.plot_results(results_combine, close, save_path=plot_file)
-            plt.close('all')
+        if 'alpha_hmm_combine' not in strategies:
+            print(f"\n[5/6] Skipping {model_name} - Alpha + HMM Combine...")
+        else:
+            print(f"\n[5/6] Running {model_name} - Alpha + HMM Combine...")
+            if is_multi_asset and use_regime_rebalancing:
+                print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+            results_combine = engine_combine.run(
+                strategy_mode='alpha_hmm_combine',
+                walk_forward=True,
+                train_window=train_window,
+                refit_every=refit_every,
+                bear_prob_threshold=bear_prob_threshold,
+                bull_prob_threshold=bull_prob_threshold,
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
+            )
             
-            # Save 4-state strategy plot
-            plot_file_4state = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine_4State.png')
-            BacktestPlotter.plot_4state_strategy(results_combine, close, save_path=plot_file_4state)
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'Alpha + HMM Combine',
-            'Total Return (%)': results_combine['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_combine['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_combine['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_combine['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_combine['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_combine['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_combine['metrics']['profit_factor'],
-            'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
-            'Num Trades': results_combine['num_trades'],
-            'Time in Market (%)': results_combine['time_in_market'] * 100
-        })
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine.png')
+                BacktestPlotter.plot_results(results_combine, close, save_path=plot_file)
+                plt.close('all')
+                
+                # Save 4-state strategy plot
+                plot_file_4state = os.path.join(plots_dir, f'{model_name}_Alpha_HMM_Combine_4State.png')
+                BacktestPlotter.plot_4state_strategy(results_combine, close, save_path=plot_file_4state)
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Alpha + HMM Combine',
+                'Total Return (%)': results_combine['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_combine['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_combine['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_combine['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_combine['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_combine['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_combine['metrics']['profit_factor'],
+                'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
+                'Num Trades': results_combine['num_trades'],
+                'Time in Market (%)': results_combine['time_in_market'] * 100
+            })
         
         # Strategy 6: Regime-Adaptive Alpha (Trend-following in bull/neutral, Bollinger Bands in bear)
-        print(f"\n[6/6] Running {model_name} - Regime-Adaptive Alpha...")
-        print("  Bull/Neutral: Trend-following | Bear: Bollinger Bands mean-reversion")
-        
-        # Create Bollinger Bands model for bear markets
-        bb_model = BollingerBands(short_window=20, long_window=2)
-        
-        hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
-        engine_adaptive = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
-                                        bear_alpha_model=bb_model)
-        results_adaptive = engine_adaptive.run(
-            strategy_mode='regime_adaptive_alpha',
-            walk_forward=True,
-            train_window=train_window,
-            refit_every=refit_every,
-            bear_prob_threshold=bear_prob_threshold,
-            bull_prob_threshold=bull_prob_threshold,
-            rebalance_frequency=rebalance_frequency,
-            transaction_cost=transaction_cost,
-            enable_logging=enable_logging,
-            log_dir=log_dir if log_dir else 'logs'
-        )
-        
-        # Save individual plot
-        if save_plots:
-            plot_file = os.path.join(plots_dir, f'{model_name}_Regime_Adaptive.png')
-            BacktestPlotter.plot_results(results_adaptive, close, save_path=plot_file)
-            plt.close('all')
-        
-        results_list.append({
-            'Model': model_name,
-            'Strategy': 'Regime-Adaptive Alpha',
-            'Total Return (%)': results_adaptive['metrics']['total_return'] * 100,
-            'Annual Return (%)': results_adaptive['metrics']['annualized_return'] * 100,
-            'Sharpe Ratio': results_adaptive['metrics']['sharpe_ratio'],
-            'Sortino Ratio': results_adaptive['metrics']['sortino_ratio'],
-            'Calmar Ratio': results_adaptive['metrics']['calmar_ratio'],
-            'Max Drawdown (%)': results_adaptive['metrics']['max_drawdown'] * 100,
-            'Profit Factor': results_adaptive['metrics']['profit_factor'],
-            'Win Rate (%)': results_adaptive['metrics']['win_rate'] * 100,
-            'Num Trades': results_adaptive['num_trades'],
-            'Time in Market (%)': results_adaptive['time_in_market'] * 100
-        })
+        if 'regime_adaptive_alpha' not in strategies:
+            print(f"\n[6/6] Skipping {model_name} - Regime-Adaptive Alpha...")
+        else:
+            print(f"\n[6/6] Running {model_name} - Regime-Adaptive Alpha...")
+            print("  Bull/Neutral: Trend-following | Bear: Bollinger Bands mean-reversion")
+            
+            # Create Bollinger Bands model for bear markets
+            bb_model = BollingerBands(short_window=20, long_window=2)
+            
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            engine_adaptive = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
+                                            bear_alpha_model=bb_model)
+            results_adaptive = engine_adaptive.run(
+                strategy_mode='regime_adaptive_alpha',
+                walk_forward=True,
+                train_window=train_window,
+                refit_every=refit_every,
+                bear_prob_threshold=bear_prob_threshold,
+                bull_prob_threshold=bull_prob_threshold,
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
+            )
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Regime_Adaptive.png')
+                BacktestPlotter.plot_results(results_adaptive, close, save_path=plot_file)
+                plt.close('all')
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Regime-Adaptive Alpha',
+                'Total Return (%)': results_adaptive['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_adaptive['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_adaptive['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_adaptive['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_adaptive['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_adaptive['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_adaptive['metrics']['profit_factor'],
+                'Win Rate (%)': results_adaptive['metrics']['win_rate'] * 100,
+                'Num Trades': results_adaptive['num_trades'],
+                'Time in Market (%)': results_adaptive['time_in_market'] * 100
+            })
     
     # Create results DataFrame
     results_df = pd.DataFrame(results_list)
@@ -534,26 +569,35 @@ def run_comparison(ticker = None,
     }).round(2)
     print(avg_by_strategy.to_string())
     
-    # Calculate HMM impact
+    # Calculate HMM impact (only if required strategies exist)
     print("\n" + "="*80)
     print("HMM IMPACT ANALYSIS")
     print("="*80)
     
-    for model_name in results_df['Model'].unique():
-        model_data = results_df[results_df['Model'] == model_name]
-        
-        alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
-        hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
-        alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
-        alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
-        
-        print(f"\n{model_name}:")
-        print(f"  Alpha Only Return: {alpha_only['Total Return (%)']:.2f}%")
-        print(f"  HMM Only Return: {hmm_only['Total Return (%)']:.2f}%")
-        print(f"  Alpha + Filter Return: {alpha_filter['Total Return (%)']:.2f}%")
-        print(f"  Alpha + Combine Return: {alpha_combine['Total Return (%)']:.2f}%")
-        print(f"  HMM Filter Impact: {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
-        print(f"  HMM Combine Impact: {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
+    # Check if we have the necessary strategies for impact analysis
+    available_strategies = results_df['Strategy'].unique()
+    required_strategies = ['Alpha Only', 'HMM Only', 'Alpha + HMM Filter', 'Alpha + HMM Combine']
+    has_all_required = all(strategy in available_strategies for strategy in required_strategies)
+    
+    if not has_all_required:
+        print(f"\nSkipping HMM Impact Analysis - requires all of: {', '.join(required_strategies)}")
+        print(f"Available strategies: {', '.join(available_strategies)}")
+    else:
+        for model_name in results_df['Model'].unique():
+            model_data = results_df[results_df['Model'] == model_name]
+            
+            alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
+            hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
+            alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
+            alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
+            
+            print(f"\n{model_name}:")
+            print(f"  Alpha Only Return: {alpha_only['Total Return (%)']:.2f}%")
+            print(f"  HMM Only Return: {hmm_only['Total Return (%)']:.2f}%")
+            print(f"  Alpha + Filter Return: {alpha_filter['Total Return (%)']:.2f}%")
+            print(f"  Alpha + Combine Return: {alpha_combine['Total Return (%)']:.2f}%")
+            print(f"  HMM Filter Impact: {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
+            print(f"  HMM Combine Impact: {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%")
     
     # Save results to output directory
     ticker_filename = '_'.join(ticker) if is_multi_asset else ticker[0]
@@ -650,22 +694,26 @@ def run_comparison(ticker = None,
             f.write(f"| {strategy} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Calmar Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.2f} | {row['Time in Market (%)']:.2f} |\n")
         f.write("\n")
         
-        # HMM Impact Analysis
-        f.write(f"## HMM Impact Analysis\n\n")
-        for model_name in results_df['Model'].unique():
-            model_data = results_df[results_df['Model'] == model_name]
-            alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
-            hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
-            alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
-            alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
-            
-            f.write(f"### {model_name}\n\n")
-            f.write(f"- **Alpha Only Return:** {alpha_only['Total Return (%)']:.2f}%\n")
-            f.write(f"- **HMM Only Return:** {hmm_only['Total Return (%)']:.2f}%\n")
-            f.write(f"- **Alpha + Filter Return:** {alpha_filter['Total Return (%)']:.2f}%\n")
-            f.write(f"- **Alpha + Combine Return:** {alpha_combine['Total Return (%)']:.2f}%\n")
-            f.write(f"- **HMM Filter Impact:** {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n")
-            f.write(f"- **HMM Combine Impact:** {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n\n")
+        # HMM Impact Analysis (only if we have required strategies)
+        if has_all_required:
+            f.write(f"## HMM Impact Analysis\n\n")
+            for model_name in results_df['Model'].unique():
+                model_data = results_df[results_df['Model'] == model_name]
+                alpha_only = model_data[model_data['Strategy'] == 'Alpha Only'].iloc[0]
+                hmm_only = model_data[model_data['Strategy'] == 'HMM Only'].iloc[0]
+                alpha_filter = model_data[model_data['Strategy'] == 'Alpha + HMM Filter'].iloc[0]
+                alpha_combine = model_data[model_data['Strategy'] == 'Alpha + HMM Combine'].iloc[0]
+                
+                f.write(f"### {model_name}\n\n")
+                f.write(f"- **Alpha Only Return:** {alpha_only['Total Return (%)']:.2f}%\n")
+                f.write(f"- **HMM Only Return:** {hmm_only['Total Return (%)']:.2f}%\n")
+                f.write(f"- **Alpha + Filter Return:** {alpha_filter['Total Return (%)']:.2f}%\n")
+                f.write(f"- **Alpha + Combine Return:** {alpha_combine['Total Return (%)']:.2f}%\n")
+                f.write(f"- **HMM Filter Impact:** {alpha_filter['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n")
+                f.write(f"- **HMM Combine Impact:** {alpha_combine['Total Return (%)'] - alpha_only['Total Return (%)']:.2f}%\n\n")
+        else:
+            f.write(f"## HMM Impact Analysis\n\n")
+            f.write(f"*Skipped: Requires all strategies (Alpha Only, HMM Only, Alpha + HMM Filter, Alpha + HMM Combine)*\n\n")
         
         # Files generated
         f.write(f"---\n\n")
@@ -834,6 +882,13 @@ Examples:
         help='Enable detailed CSV logging of trading decisions'
     )
     
+    parser.add_argument(
+        '--strategies',
+        type=str,
+        default=None,
+        help='Comma-separated list of strategies to run. Options: alpha_only, hmm_only, oracle, alpha_hmm_filter, alpha_hmm_combine, regime_adaptive_alpha. Default: all strategies'
+    )
+    
     # Parse arguments
     args = parser.parse_args()
     
@@ -859,6 +914,11 @@ Examples:
     if args.end_date:
         final_end_date = args.end_date
     
+    # Process strategies argument
+    strategies_to_run = None
+    if args.strategies:
+        strategies_to_run = [s.strip() for s in args.strategies.split(',')]
+    
     # Run comparison
     results, output_directory = run_comparison(
         ticker=ticker,
@@ -871,7 +931,8 @@ Examples:
         output_dir=args.output_dir,
         save_plots=args.save_plots or args.plot,
         config_path=args.config,
-        enable_logging=args.enable_logging
+        enable_logging=args.enable_logging,
+        strategies=strategies_to_run
     )
     
     print("\n" + "="*80)

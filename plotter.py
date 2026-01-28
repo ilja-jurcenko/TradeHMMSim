@@ -263,28 +263,43 @@ class BacktestPlotter:
         ax2.legend(loc='upper left', fontsize=8, ncol=2)
         ax2.grid(True, alpha=0.3)
         
-        # Plot 3: Positions and equity curve
+        # Plot 3: Positions and underlying price change
         ax3 = axes[2]
         
-        # Align equity curve
-        equity_aligned = equity_curve.reindex(common_idx, method='ffill')
-        initial_capital = results.get('initial_capital', 100000)
-        equity_pct = (equity_aligned / initial_capital - 1) * 100
+        # Calculate underlying instrument price change as percentage
+        price_pct = (close_aligned / close_aligned.iloc[0] - 1) * 100
         
-        ax3.plot(common_idx, equity_pct, color='blue', linewidth=2, label='Strategy Return')
+        ax3.plot(common_idx, price_pct, color='blue', linewidth=2, label='Instrument Price')
         ax3.axhline(0, color='black', linestyle='-', alpha=0.3, linewidth=0.5)
         
-        # Highlight when in position
+        # Plot positions on secondary y-axis
+        ax3_pos = ax3.twinx()
         positions_aligned = positions.reindex(common_idx, fill_value=0)
-        in_position = positions_aligned > 0
-        if in_position.any():
-            y_min = equity_pct.min()
-            y_max = equity_pct.max()
-            ax3.fill_between(common_idx, y_min, y_max, where=in_position, 
-                           alpha=0.15, color='green', label='In Position', interpolate=True)
+        ax3_pos.plot(common_idx, positions_aligned, color='gray', linewidth=1, 
+                    alpha=0.5, linestyle='--', label='Position')
+        ax3_pos.set_ylabel('Position Size', fontsize=10, color='gray')
+        ax3_pos.tick_params(axis='y', labelcolor='gray')
+        ax3_pos.set_ylim([-0.1, 1.1])
         
-        ax3.set_ylabel('Return (%)', fontsize=10)
-        ax3.set_title('Equity Curve', fontsize=12, fontweight='bold')
+        # Mark entry and exit points
+        position_changes = positions_aligned.diff().fillna(0)
+        entries = position_changes > 0
+        exits = position_changes < 0
+        
+        if entries.any():
+            entry_points = price_pct[entries]
+            ax3.scatter(entry_points.index, entry_points.values, 
+                       color='green', marker='^', s=100, zorder=5, 
+                       label='Entry', edgecolors='darkgreen', linewidths=1.5)
+        
+        if exits.any():
+            exit_points = price_pct[exits]
+            ax3.scatter(exit_points.index, exit_points.values, 
+                       color='red', marker='v', s=100, zorder=5, 
+                       label='Exit', edgecolors='darkred', linewidths=1.5)
+        
+        ax3.set_ylabel('Price Change (%)', fontsize=10)
+        ax3.set_title('Underlying Instrument with Positions', fontsize=12, fontweight='bold')
         ax3.legend(loc='upper left', fontsize=9)
         ax3.grid(True, alpha=0.3)
         
