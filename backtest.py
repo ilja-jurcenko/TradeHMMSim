@@ -1,5 +1,5 @@
 """
-Backtest simulation engine with walk-forward testing and rebalancing.
+Refactored backtest simulation engine using strategy pattern.
 """
 
 import pandas as pd
@@ -11,12 +11,30 @@ from alpha_models.base import AlphaModel
 from signal_filter.hmm_filter import HMMRegimeFilter
 from statistics import Statistics
 from alpha_model_factory import AlphaModelFactory
+from strategies import (
+    AlphaOnlyStrategy,
+    HMMOnlyStrategy,
+    OracleStrategy,
+    AlphaHMMFilterStrategy,
+    AlphaHMMCombineStrategy,
+    RegimeAdaptiveAlphaStrategy
+)
 
 
 class BacktestEngine:
     """
     Backtest engine for testing trading strategies with optional HMM filtering.
     """
+    
+    # Strategy registry
+    STRATEGIES = {
+        'alpha_only': AlphaOnlyStrategy,
+        'hmm_only': HMMOnlyStrategy,
+        'oracle': OracleStrategy,
+        'alpha_hmm_filter': AlphaHMMFilterStrategy,
+        'alpha_hmm_combine': AlphaHMMCombineStrategy,
+        'regime_adaptive_alpha': RegimeAdaptiveAlphaStrategy
+    }
     
     def __init__(self, close: pd.Series, 
                  alpha_model: Optional[AlphaModel] = None,
@@ -84,30 +102,7 @@ class BacktestEngine:
     @staticmethod
     def from_config(close: pd.Series, config: Dict[str, Any],
                    hmm_filter: Optional[HMMRegimeFilter] = None) -> 'BacktestEngine':
-        """
-        Create BacktestEngine from full configuration dictionary.
-        
-        Parameters:
-        -----------
-        close : pd.Series
-            Close price series
-        config : Dict[str, Any]
-            Full configuration dictionary (as loaded from JSON)
-        hmm_filter : HMMRegimeFilter, optional
-            HMM filter for regime-based filtering
-            
-        Returns:
-        --------
-        BacktestEngine
-            Configured backtest engine instance
-            
-        Example:
-        --------
-        >>> from config_loader import ConfigLoader
-        >>> config = ConfigLoader.load_config('config_default.json')
-        >>> engine = BacktestEngine.from_config(close_prices, config, hmm_filter)
-        """
-        # Extract relevant sections
+        """Create BacktestEngine from full configuration dictionary."""
         alpha_config = config.get('alpha_model')
         if alpha_config is None:
             raise KeyError("Configuration missing 'alpha_model' section")
@@ -126,25 +121,7 @@ class BacktestEngine:
     def from_alpha_config(close: pd.Series, alpha_config: Dict[str, Any],
                          hmm_filter: Optional[HMMRegimeFilter] = None,
                          initial_capital: float = 100000.0) -> 'BacktestEngine':
-        """
-        Create BacktestEngine from alpha model configuration only.
-        
-        Parameters:
-        -----------
-        close : pd.Series
-            Close price series
-        alpha_config : Dict[str, Any]
-            Alpha model configuration with 'type' and 'parameters'
-        hmm_filter : HMMRegimeFilter, optional
-            HMM filter for regime-based filtering
-        initial_capital : float
-            Initial capital
-            
-        Returns:
-        --------
-        BacktestEngine
-            Configured backtest engine instance
-        """
+        """Create BacktestEngine from alpha model configuration only."""
         return BacktestEngine(
             close=close,
             alpha_config=alpha_config,
@@ -153,14 +130,7 @@ class BacktestEngine:
         )
     
     def get_alpha_config(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the alpha model configuration used (if created from config).
-        
-        Returns:
-        --------
-        Optional[Dict[str, Any]]
-            Alpha model configuration, or None if created from model instance
-        """
+        """Get the alpha model configuration used (if created from config)."""
         return self._alpha_config
         
     def run(self, 
@@ -175,41 +145,29 @@ class BacktestEngine:
             enable_logging: bool = False,
             log_dir: str = 'logs') -> Dict:
         """
-        Run backtest simulation.
+        Run backtest simulation using strategy pattern.
         
         Parameters:
         -----------
         strategy_mode : str
-            Strategy mode:
-            - 'alpha_only': Alpha model signals only
-            - 'hmm_only': HMM regime signals only
-            - 'alpha_hmm_filter': HMM filters incorrect alpha signals (bear filter)
-            - 'alpha_hmm_combine': Combine alpha and HMM signals (take position when either signals)
-            - 'regime_adaptive_alpha': Use trend-following in bull/neutral, mean-reversion in bear
-        rebalance_frequency : int
-            Rebalancing frequency (1 = every period, 5 = every 5 periods, etc.)
-        walk_forward : bool
-            Use walk-forward testing for HMM (if HMM is used)
-        train_window : int
-            Training window for walk-forward HMM
-        refit_every : int
-            Refit HMM model every N periods
-        bear_prob_threshold : float
-            Bear regime probability threshold for exit
-        bull_prob_threshold : float
-            Bull regime probability threshold for entry override
-        transaction_cost : float
-            Transaction cost per trade (as fraction, e.g., 0.001 = 0.1%)
-        enable_logging : bool
-            Enable detailed logging of trading decisions
-        log_dir : str
-            Directory to save log files
+            Strategy mode (alpha_only, hmm_only, oracle, alpha_hmm_filter, 
+            alpha_hmm_combine, regime_adaptive_alpha)
+        ... (other parameters as before)
             
         Returns:
         --------
         Dict
             Backtest results including metrics and equity curve
         """
+        # Validate strategy
+        if strategy_mode not in self.STRATEGIES:
+            raise ValueError(f"Unknown strategy: {strategy_mode}. "
+                           f"Available: {list(self.STRATEGIES.keys())}")
+        
+        # Oracle strategy must use all data (no walk-forward)
+        if strategy_mode == 'oracle':
+            walk_forward = False
+        
         print(f"\n{'='*60}")
         print(f"RUNNING BACKTEST: {strategy_mode.upper()}")
         print(f"{'='*60}")
@@ -218,326 +176,212 @@ class BacktestEngine:
         print(f"Rebalance Frequency: {rebalance_frequency} period(s)")
         print(f"Transaction Cost: {transaction_cost*100:.3f}%")
         
-        # Setup logging if enabled
-        log_file = None
-        if enable_logging:
-            os.makedirs(log_dir, exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            log_filename = f"{strategy_mode}_{self.alpha_model.get_name()}_{timestamp}.csv"
-            log_file = os.path.join(log_dir, log_filename)
-            print(f"Logging enabled: {log_file}")
+        # Setup logging
+        log_file = self._setup_logging(enable_logging, log_dir, strategy_mode)
         
         # Generate alpha signals
         alpha_signals = self.alpha_model.generate_signals(self.close)
+        alpha_signals = self._apply_fsm_logic(alpha_signals)
         
-        # Apply finite state machine logic to validate transitions
-        positions = self._apply_fsm_logic(alpha_signals)
+        # Get strategy instance
+        strategy = self.STRATEGIES[strategy_mode]()
         
-        # Initialize logging data structure
-        log_data = [] if enable_logging else None
+        # Execute strategy
+        if strategy_mode == 'alpha_only':
+            positions = self._run_alpha_only(strategy, alpha_signals)
+            log_data = self._log_alpha_only(strategy, positions, alpha_signals, enable_logging)
+            state_info = None
+            
+        elif strategy_mode in ['hmm_only', 'oracle', 'alpha_hmm_filter', 
+                               'alpha_hmm_combine', 'regime_adaptive_alpha']:
+            if self.hmm_filter is None:
+                raise ValueError(f"{strategy_mode} requires HMM filter")
+            
+            positions, log_data, state_info = self._run_hmm_strategy(
+                strategy, strategy_mode, alpha_signals, walk_forward,
+                train_window, refit_every, bear_prob_threshold, 
+                bull_prob_threshold, enable_logging
+            )
         
-        # Apply HMM filtering if needed
-        if strategy_mode != 'alpha_only' and self.hmm_filter is not None:
-            print("\nApplying HMM regime filtering...")
-            
-            if walk_forward:
-                probs, regime, switches = self.hmm_filter.walkforward_filter(
-                    self.close, 
-                    train_window=train_window,
-                    refit_every=refit_every
-                )
-            else:
-                # Simple fit and predict
-                features = self.hmm_filter.make_features(self.close)
-                self.hmm_filter.fit(features)
-                probs_array = self.hmm_filter.filtered_state_probs(features)
-                probs = pd.DataFrame(
-                    probs_array, 
-                    index=features.index, 
-                    columns=list(range(self.hmm_filter.n_states))
-                )
-                regime = self.hmm_filter.detect_regime_switches(probs)
-                switches = regime[regime.ne(regime.shift(1))].dropna()
-            
-            # Identify regimes
-            regime_info = self.hmm_filter.identify_regimes(self.close, regime)
-            bear_regime = regime_info['bear_regime']
-            bull_regime = regime_info['bull_regime']
-            neutral_regime = regime_info['neutral_regime']
-            
-            print(f"  Bear regime: {bear_regime} (vol: {regime_info['regime_volatilities'][bear_regime]:.4f})")
-            print(f"  Bull regime: {bull_regime} (vol: {regime_info['regime_volatilities'][bull_regime]:.4f})")
-            if neutral_regime is not None:
-                print(f"  Neutral regime: {neutral_regime} (vol: {regime_info['regime_volatilities'][neutral_regime]:.4f})")
-            print(f"  Detected {len(switches)} regime switches")
-            
-            # Align indices
-            common_idx = alpha_signals.index.intersection(probs.index)
-            alpha_signals_aligned = alpha_signals.loc[common_idx]
-            
-            # Get regime probabilities
-            bear_prob = probs[bear_regime].loc[common_idx]
-            bull_prob = probs[bull_regime].loc[common_idx]
-            
-            # Combine bull + neutral for non-bearish signal
-            # Neutral markets are generally safe for trading, so treat bull+neutral as favorable
-            bull_prob_combined = bull_prob.copy()
-            if neutral_regime is not None:
-                bull_prob_combined = bull_prob + probs[neutral_regime].loc[common_idx]
-            
-            # Apply strategy logic
-            if strategy_mode == 'hmm_only':
-                # HMM only: ignore alpha signals
-                # Use combined bull+neutral probability
-                positions = (bull_prob_combined > bull_prob_threshold).astype(int)
-                
-                # Log decisions
-                if enable_logging:
-                    for i, idx in enumerate(common_idx):
-                        prev_pos = 0 if i == 0 else positions.iloc[i-1]
-                        curr_pos = positions.iloc[i]
-                        action = self._determine_action(prev_pos, curr_pos)
-                        
-                        log_data.append({
-                            'Date': idx,
-                            'Price': self.close.loc[idx],
-                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
-                            'Bear_Prob': bear_prob.iloc[i],
-                            'Bull_Prob': bull_prob.iloc[i],
-                            'Bull_Combined_Prob': bull_prob_combined.iloc[i],
-                            'HMM_Signal': 1 if bull_prob_combined.iloc[i] > bull_prob_threshold else 0,
-                            'Position': curr_pos,
-                            'Action': action
-                        })
-                
-            elif strategy_mode == 'alpha_hmm_filter':
-                # Alpha + HMM filter: HMM only filters out during bear regime
-                bear_filter = (bear_prob < bear_prob_threshold).astype(int)
-                positions = alpha_signals_aligned * bear_filter
-                
-                # Log decisions
-                if enable_logging:
-                    for i, idx in enumerate(common_idx):
-                        prev_pos = 0 if i == 0 else positions.iloc[i-1]
-                        curr_pos = positions.iloc[i]
-                        action = self._determine_action(prev_pos, curr_pos)
-                        
-                        log_data.append({
-                            'Date': idx,
-                            'Price': self.close.loc[idx],
-                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
-                            'Bear_Prob': bear_prob.iloc[i],
-                            'Bull_Prob': bull_prob.iloc[i],
-                            'Bear_Filter': bear_filter.iloc[i],
-                            'HMM_Signal': 0 if bear_prob.iloc[i] >= bear_prob_threshold else 1,
-                            'Position': curr_pos,
-                            'Action': action
-                        })
-                
-            elif strategy_mode == 'alpha_hmm_combine':
-                # Alpha + HMM combine: 4-State Variance-Trend Strategy
-                # 
-                # Combines HMM (market variance/regime) with Alpha (trend direction):
-                #   - HMM detects variance: Low (bull/neutral prob > threshold) vs High (bear prob > threshold)
-                #   - Alpha detects trend: Bullish vs Bearish
-                #
-                # Four States:
-                #   State 1: Low variance + Bullish trend  → BUY (if not in position)
-                #   State 2: Low variance + Bearish trend  → HOLD (no action)
-                #   State 3: High variance + Bullish trend → HOLD (no action)
-                #   State 4: High variance + Bearish trend → SELL (if in position)
-                #
-                # Trading Logic:
-                #   - Enter long only in State 1 (safe bull market)
-                #   - Exit long only in State 4 (dangerous bear market)
-                #   - All other states: maintain current position
-                
-                # Detect variance regimes
-                low_variance = (bull_prob_combined > bull_prob_threshold).astype(bool)
-                high_variance = (bear_prob > bear_prob_threshold).astype(bool)
-                
-                # Detect trend direction (alpha signals: 1=bullish, 0/negative=bearish)
-                bullish_trend = (alpha_signals_aligned > 0).astype(bool)
-                bearish_trend = ~bullish_trend
-                
-                # Define the 4 states
-                state_1 = low_variance & bullish_trend   # Low variance + Bullish → BUY signal
-                state_2 = low_variance & bearish_trend   # Low variance + Bearish → HOLD
-                state_3 = high_variance & bullish_trend  # High variance + Bullish → HOLD
-                state_4 = high_variance & bearish_trend  # High variance + Bearish → SELL signal
-                
-                # Create state labels for each period (for visualization)
-                state_labels = pd.Series('Unknown', index=common_idx)
-                state_labels[state_1] = 'State 1: Low Var + Bull'
-                state_labels[state_2] = 'State 2: Low Var + Bear'
-                state_labels[state_3] = 'State 3: High Var + Bull'
-                state_labels[state_4] = 'State 4: High Var + Bear'
-                
-                # Initialize positions array
-                positions = pd.Series(0, index=common_idx, dtype=int)
-                
-                # State machine: track position and respond to state transitions
-                current_position = 0  # Start flat
-                # Track previous state for each period
-                prev_state = None  # Assume starting in State 1
-                
-                for i in range(len(common_idx)):
-                    idx = common_idx[i]
-                    prev_position = current_position
-                    
-                    # Determine current state
-                    if state_1.iloc[i]:
-                        current_state_num = 1
-                    elif state_2.iloc[i]:
-                        current_state_num = 2
-                    elif state_3.iloc[i]:
-                        current_state_num = 3
-                    elif state_4.iloc[i]:
-                        current_state_num = 4
-                    else:
-                        current_state_num = None
-                    
-                    # Detect state transitions and update position
-                    if prev_state is not None and current_state_num is not None:
-                        # State switch from 1 to (2,3,4): SELL
-                        if prev_state in [1,2,3] and current_state_num in [4] and current_position==1:
-                            current_position = 0
-                        # State switch from (2,3,4) to 1: BUY
-                        elif prev_state in [2,3,4] and current_state_num in [1] and current_position==0:
-                            current_position = 1
-                    
-                    # Update prev_state for next iteration
-                    prev_state = current_state_num
-                    
-                    positions.iloc[i] = current_position
-                    
-                    # Log decisions
-                    if enable_logging:
-                        # Determine which state
-                        if state_1.iloc[i]:
-                            state_label = 'State_1_Low_Var_Bull'
-                        elif state_2.iloc[i]:
-                            state_label = 'State_2_Low_Var_Bear'
-                        elif state_3.iloc[i]:
-                            state_label = 'State_3_High_Var_Bull'
-                        elif state_4.iloc[i]:
-                            state_label = 'State_4_High_Var_Bear'
-                        else:
-                            state_label = 'Unknown'
-                        
-                        action = self._determine_action(prev_position, current_position)
-                        
-                        log_data.append({
-                            'Date': idx,
-                            'Price': self.close.loc[idx],
-                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
-                            'Bear_Prob': bear_prob.iloc[i],
-                            'Bull_Prob': bull_prob.iloc[i],
-                            'Bull_Combined_Prob': bull_prob_combined.iloc[i],
-                            'Low_Variance': low_variance.iloc[i],
-                            'High_Variance': high_variance.iloc[i],
-                            'State': state_label,
-                            'Position': current_position,
-                            'Action': action
-                        })
-                
-                # Store state information for plotting
-                self.state_labels = state_labels
-                self.state_1 = state_1
-                self.state_2 = state_2
-                self.state_3 = state_3
-                self.state_4 = state_4
-                
-                # Log state transitions for diagnostics
-                num_state1 = state_1.sum()
-                num_state2 = state_2.sum()
-                num_state3 = state_3.sum()
-                num_state4 = state_4.sum()
-                print(f"  State 1 (Low var + Bull): {num_state1} periods")
-                print(f"  State 2 (Low var + Bear): {num_state2} periods")
-                print(f"  State 3 (High var + Bull): {num_state3} periods")
-                print(f"  State 4 (High var + Bear): {num_state4} periods")
-            
-            elif strategy_mode == 'regime_adaptive_alpha':
-                # Regime-Adaptive Alpha: Switch strategies based on market regime
-                # 
-                # Strategy:
-                #   - Bull/Neutral: Use trend-following alpha (standard alpha_model)
-                #   - Bear: Use mean-reversion alpha (bear_alpha_model, typically Bollinger Bands)
-                #
-                # This adapts to market conditions: ride trends up, catch bounces down
-                
-                if self.bear_alpha_model is None:
-                    raise ValueError(
-                        "regime_adaptive_alpha strategy requires bear_alpha_model to be set"
-                    )
-                
-                # Generate signals from bear market alpha model (e.g., Bollinger Bands)
-                bear_signals = self.bear_alpha_model.generate_signals(self.close)
-                bear_signals_aligned = bear_signals.reindex(common_idx, fill_value=0)
-                
-                # Determine current regime for each period
-                positions = pd.Series(0, index=common_idx)
-                
-                # Use trend-following in bull/neutral, mean-reversion in bear
-                for i in range(len(common_idx)):
-                    idx = common_idx[i]
-                    current_regime = regime.loc[idx]
-                    prev_pos = 0 if i == 0 else positions.iloc[i-1]
-                    
-                    if current_regime == 'bear':
-                        # Use bear market strategy (mean-reversion)
-                        positions.iloc[i] = bear_signals_aligned.iloc[i]
-                        active_model = 'Bear_Alpha'
-                    else:
-                        # Use bull/neutral market strategy (trend-following)
-                        positions.iloc[i] = alpha_signals_aligned.iloc[i]
-                        active_model = 'Bull_Alpha'
-                    
-                    # Log decisions
-                    if enable_logging:
-                        action = self._determine_action(prev_pos, positions.iloc[i])
-                        
-                        log_data.append({
-                            'Date': idx,
-                            'Price': self.close.loc[idx],
-                            'Alpha_Signal': alpha_signals_aligned.iloc[i],
-                            'Bear_Signal': bear_signals_aligned.iloc[i],
-                            'Regime': current_regime,
-                            'Active_Model': active_model,
-                            'Position': positions.iloc[i],
-                            'Action': action
-                        })
-                
-                print(f"  Regime switches - Trend-following: {(regime != 'bear').sum()} periods, "
-                      f"Mean-reversion: {(regime == 'bear').sum()} periods")
-            
-            # Store regime info for later use
-            self.regime_probs = probs
-            self.regime = regime
-            self.regime_info = regime_info
-        
-        # Apply rebalancing frequency
+        # Apply rebalancing
         if rebalance_frequency > 1:
             print(f"\nApplying rebalancing frequency: {rebalance_frequency}")
             positions = self._apply_rebalancing(positions, rebalance_frequency)
         
-        # Log alpha_only strategy decisions
-        if enable_logging and strategy_mode == 'alpha_only':
-            for i in range(len(positions)):
-                idx = positions.index[i]
-                prev_pos = 0 if i == 0 else positions.iloc[i-1]
-                curr_pos = positions.iloc[i]
-                action = self._determine_action(prev_pos, curr_pos)
-                
-                log_data.append({
-                    'Date': idx,
-                    'Price': self.close.loc[idx],
-                    'Alpha_Signal': alpha_signals.loc[idx],
-                    'Position': curr_pos,
-                    'Action': action
-                })
+        # Calculate returns and metrics
+        results = self._calculate_results(positions, transaction_cost, strategy_mode)
         
+        # Add state info if available
+        if state_info:
+            results.update(state_info)
+        
+        # Write log file
+        if enable_logging and log_data and log_file:
+            self._write_log_file(log_data, log_file, results['equity_curve'])
+        
+        self._print_summary(results)
+        
+        return results
+    
+    def _setup_logging(self, enable_logging: bool, log_dir: str, strategy_mode: str):
+        """Setup logging configuration."""
+        if not enable_logging:
+            return None
+            
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = f"{strategy_mode}_{self.alpha_model.get_name()}_{timestamp}.csv"
+        log_file = os.path.join(log_dir, log_filename)
+        print(f"Logging enabled: {log_file}")
+        return log_file
+    
+    def _run_alpha_only(self, strategy, alpha_signals: pd.Series) -> pd.Series:
+        """Run alpha-only strategy."""
+        positions = strategy.generate_positions(
+            alpha_signals, self.close, alpha_signals.index
+        )
+        return positions
+    
+    def _log_alpha_only(self, strategy, positions: pd.Series, 
+                       alpha_signals: pd.Series, enable_logging: bool):
+        """Generate log data for alpha-only strategy."""
+        if not enable_logging:
+            return None
+        
+        return strategy.generate_log_data(
+            positions, self.close, alpha_signals, positions.index
+        )
+    
+    def _run_hmm_strategy(self, strategy, strategy_mode: str, alpha_signals: pd.Series,
+                         walk_forward: bool, train_window: int, refit_every: int,
+                         bear_prob_threshold: float, bull_prob_threshold: float,
+                         enable_logging: bool):
+        """Run HMM-based strategy."""
+        print("\nApplying HMM regime filtering...")
+        
+        # Fit HMM
+        probs, regime, switches, regime_info = self._fit_hmm(
+            strategy_mode, walk_forward, train_window, refit_every
+        )
+        
+        # Print regime info
+        self._print_regime_info(regime_info, switches)
+        
+        # Store regime info for results
+        self.regime_probs = probs
+        self.regime = regime
+        self.regime_info = regime_info
+        
+        # Align indices
+        common_idx = alpha_signals.index.intersection(probs.index)
+        alpha_signals_aligned = alpha_signals.loc[common_idx]
+        
+        # Get regime probabilities
+        bear_regime = regime_info['bear_regime']
+        bull_regime = regime_info['bull_regime']
+        neutral_regime = regime_info['neutral_regime']
+        
+        bear_prob = probs[bear_regime].loc[common_idx]
+        bull_prob = probs[bull_regime].loc[common_idx]
+        neutral_prob = probs[neutral_regime].loc[common_idx] if neutral_regime is not None else pd.Series(0, index=common_idx)
+        bull_prob_combined = bull_prob + neutral_prob if neutral_regime is not None else bull_prob.copy()
+        
+        # Prepare kwargs for strategy
+        kwargs = {
+            'bear_prob': bear_prob,
+            'bull_prob': bull_prob,
+            'neutral_prob': neutral_prob,
+            'bull_prob_combined': bull_prob_combined,
+            'bear_prob_threshold': bear_prob_threshold,
+            'bull_prob_threshold': bull_prob_threshold
+        }
+        
+        # Run specific strategy
+        state_info = {}
+        
+        if strategy_mode == 'alpha_hmm_combine':
+            positions, state_data = strategy.generate_positions(
+                alpha_signals_aligned, self.close, common_idx, **kwargs
+            )
+            state_info = {
+                'state_labels': state_data['state_labels'],
+                'state_1': state_data['state_1'],
+                'state_2': state_data['state_2'],
+                'state_3': state_data['state_3'],
+                'state_4': state_data['state_4']
+            }
+            kwargs['state_info'] = state_data
+            
+        elif strategy_mode == 'regime_adaptive_alpha':
+            if self.bear_alpha_model is None:
+                raise ValueError("regime_adaptive_alpha requires bear_alpha_model")
+            
+            bear_signals = self.bear_alpha_model.generate_signals(self.close)
+            bear_signals_aligned = bear_signals.reindex(common_idx, fill_value=0)
+            kwargs['regime'] = regime
+            kwargs['bear_signals'] = bear_signals_aligned
+            
+            positions = strategy.generate_positions(
+                alpha_signals_aligned, self.close, common_idx, **kwargs
+            )
+        else:
+            positions = strategy.generate_positions(
+                alpha_signals_aligned, self.close, common_idx, **kwargs
+            )
+        
+        # Generate log data
+        log_data = None
+        if enable_logging:
+            log_data = strategy.generate_log_data(
+                positions, self.close, alpha_signals_aligned, common_idx, **kwargs
+            )
+        
+        return positions, log_data, state_info
+    
+    def _fit_hmm(self, strategy_mode: str, walk_forward: bool, 
+                 train_window: int, refit_every: int):
+        """Fit HMM model based on strategy mode."""
+        if strategy_mode == 'oracle' or not walk_forward:
+            # Fit on ALL data (oracle mode or simple fit)
+            if strategy_mode == 'oracle':
+                print("  ⚠️  ORACLE MODE: Fitting HMM on entire dataset (future knowledge)")
+            
+            features = self.hmm_filter.make_features(self.close)
+            self.hmm_filter.fit(features)
+            probs_array = self.hmm_filter.filtered_state_probs(features)
+            probs = pd.DataFrame(
+                probs_array, 
+                index=features.index, 
+                columns=list(range(self.hmm_filter.n_states))
+            )
+            regime = self.hmm_filter.detect_regime_switches(probs)
+            switches = regime[regime.ne(regime.shift(1))].dropna()
+        else:
+            # Walk-forward testing
+            probs, regime, switches = self.hmm_filter.walkforward_filter(
+                self.close, 
+                train_window=train_window,
+                refit_every=refit_every
+            )
+        
+        regime_info = self.hmm_filter.identify_regimes(self.close, regime)
+        return probs, regime, switches, regime_info
+    
+    def _print_regime_info(self, regime_info: Dict, switches: pd.Series):
+        """Print regime detection information."""
+        bear_regime = regime_info['bear_regime']
+        bull_regime = regime_info['bull_regime']
+        neutral_regime = regime_info['neutral_regime']
+        
+        print(f"  Bear regime: {bear_regime} (vol: {regime_info['regime_volatilities'][bear_regime]:.4f})")
+        print(f"  Bull regime: {bull_regime} (vol: {regime_info['regime_volatilities'][bull_regime]:.4f})")
+        if neutral_regime is not None:
+            print(f"  Neutral regime: {neutral_regime} (vol: {regime_info['regime_volatilities'][neutral_regime]:.4f})")
+        print(f"  Detected {len(switches)} regime switches")
+    
+    def _calculate_results(self, positions: pd.Series, transaction_cost: float, 
+                          strategy_mode: str) -> Dict:
+        """Calculate backtest results."""
         # Calculate returns
         price_returns = self.close.pct_change().fillna(0)
         
@@ -552,21 +396,13 @@ class BacktestEngine:
             costs = position_changes * transaction_cost
             price_returns = price_returns - costs
         
-        # Strategy returns (only when in position)
+        # Strategy returns
         strategy_returns = positions.shift(1).fillna(0) * price_returns
         
         # Calculate equity curve
         equity_curve = self.initial_capital * (1 + strategy_returns).cumprod()
         
-        # Add portfolio value to log data
-        if enable_logging and log_data:
-            for i, entry in enumerate(log_data):
-                if entry['Date'] in equity_curve.index:
-                    entry['Portfolio_Value'] = equity_curve.loc[entry['Date']]
-                else:
-                    entry['Portfolio_Value'] = self.initial_capital
-        
-        # Calculate metrics (convert to numpy array)
+        # Calculate metrics
         metrics = Statistics.calculate_all_metrics(strategy_returns.values)
         
         # Calculate additional statistics
@@ -579,7 +415,7 @@ class BacktestEngine:
         self.equity_curve = equity_curve
         self.metrics = metrics
         
-        # Extract final capital (handle both Series and DataFrame)
+        # Extract final capital
         final_capital_value = equity_curve.iloc[-1]
         if isinstance(final_capital_value, pd.Series):
             final_capital_value = final_capital_value.iloc[0]
@@ -597,7 +433,7 @@ class BacktestEngine:
             'alpha_model': self.alpha_model.get_name(),
             'initial_capital': self.initial_capital,
             'final_capital': float(final_capital_value),
-            'rebalance_frequency': rebalance_frequency
+            'rebalance_frequency': 1  # Updated by caller if needed
         }
         
         # Add HMM-specific results if available
@@ -606,150 +442,66 @@ class BacktestEngine:
             results['regime'] = self.regime
             results['regime_info'] = self.regime_info
         
-        # Add state information for alpha_hmm_combine strategy
-        if hasattr(self, 'state_labels'):
-            results['state_labels'] = self.state_labels
-            results['state_1'] = self.state_1
-            results['state_2'] = self.state_2
-            results['state_3'] = self.state_3
-            results['state_4'] = self.state_4
+        return results
+    
+    def _write_log_file(self, log_data: List[Dict], log_file: str, equity_curve: pd.Series):
+        """Write log data to CSV file."""
+        # Add portfolio value to log data
+        for entry in log_data:
+            if entry['Date'] in equity_curve.index:
+                entry['Portfolio_Value'] = equity_curve.loc[entry['Date']]
+            else:
+                entry['Portfolio_Value'] = self.initial_capital
         
+        log_df = pd.DataFrame(log_data)
+        log_df.to_csv(log_file, index=False)
+        print(f"\n✓ Log file saved: {log_file}")
+        print(f"  Total entries: {len(log_df)}")
+    
+    def _print_summary(self, results: Dict):
+        """Print backtest summary."""
         print(f"\n{'='*60}")
         print("BACKTEST COMPLETE")
         print(f"{'='*60}")
-        print(f"Number of Trades: {num_trades}")
-        print(f"Time in Market: {time_in_market*100:.1f}%")
+        print(f"Number of Trades: {results['num_trades']}")
+        print(f"Time in Market: {results['time_in_market']*100:.1f}%")
         print(f"Final Capital: ${results['final_capital']:,.2f}")
-        print(f"Total Return: {metrics['total_return']*100:.2f}%")
-        
-        # Write log file
-        if enable_logging and log_data and log_file:
-            log_df = pd.DataFrame(log_data)
-            log_df.to_csv(log_file, index=False)
-            print(f"\n✓ Log file saved: {log_file}")
-            print(f"  Total entries: {len(log_df)}")
-        
-        return results
-    
-    def _determine_action(self, prev_position: int, curr_position: int) -> str:
-        """
-        Determine trading action based on position change.
-        
-        Parameters:
-        -----------
-        prev_position : int
-            Previous position (-1, 0, or 1)
-        curr_position : int
-            Current position (-1, 0, or 1)
-            
-        Returns:
-        --------
-        str
-            Action taken: BUY, SELL, SHORT, COVER, or HOLD
-        """
-        if prev_position == curr_position:
-            return 'HOLD'
-        elif prev_position == 0 and curr_position == 1:
-            return 'BUY'
-        elif prev_position == 1 and curr_position == 0:
-            return 'SELL'
-        elif prev_position == 0 and curr_position == -1:
-            return 'SHORT'
-        elif prev_position == -1 and curr_position == 0:
-            return 'COVER'
-        elif prev_position == 1 and curr_position == -1:
-            return 'SELL_AND_SHORT'
-        elif prev_position == -1 and curr_position == 1:
-            return 'COVER_AND_BUY'
-        else:
-            return 'UNKNOWN'
+        print(f"Total Return: {results['metrics']['total_return']*100:.2f}%")
     
     def _apply_fsm_logic(self, signals: pd.Series) -> pd.Series:
-        """
-        Apply finite state machine logic to validate position transitions.
-        
-        Position States:
-        - FLAT (0): No position
-        - LONG (1): Holding long position
-        - SHORT (-1): Holding short position
-        
-        Allowed Transitions:
-        - FLAT -> LONG (BUY signal: 0 -> 1)
-        - FLAT -> SHORT (SHORT signal: 0 -> -1)
-        - LONG -> FLAT (SELL signal: 1 -> 0)
-        - SHORT -> FLAT (COVER signal: -1 -> 0)
-        
-        Invalid Transitions (ignored):
-        - LONG -> LONG (can't buy when already long)
-        - SHORT -> SHORT (can't short when already short)
-        - FLAT -> FLAT with SELL/COVER (can't exit when no position)
-        
-        Parameters:
-        -----------
-        signals : pd.Series
-            Raw signals from alpha model
-            
-        Returns:
-        --------
-        pd.Series
-            Validated positions following FSM rules
-        """
+        """Apply finite state machine logic to validate position transitions."""
         positions = pd.Series(0, index=signals.index)
         current_state = 0  # Start FLAT
         
         for i in range(len(signals)):
             requested_signal = signals.iloc[i]
             
-            # State transition logic
             if current_state == 0:  # FLAT
-                # Can BUY (go LONG) or SHORT
                 if requested_signal == 1:
                     current_state = 1  # BUY: FLAT -> LONG
                 elif requested_signal == -1:
                     current_state = -1  # SHORT: FLAT -> SHORT
-                # else: stay FLAT (ignore redundant FLAT signals)
-                
+                    
             elif current_state == 1:  # LONG
-                # Can only SELL (go FLAT)
                 if requested_signal == 0:
                     current_state = 0  # SELL: LONG -> FLAT
                 elif requested_signal == -1:
-                    # Direct transition LONG -> SHORT (exit long, enter short)
-                    current_state = -1
-                # else: stay LONG (ignore redundant LONG signals)
-                
+                    current_state = -1  # LONG -> SHORT
+                    
             elif current_state == -1:  # SHORT
-                # Can only COVER (go FLAT)
                 if requested_signal == 0:
                     current_state = 0  # COVER: SHORT -> FLAT
                 elif requested_signal == 1:
-                    # Direct transition SHORT -> LONG (cover short, enter long)
-                    current_state = 1
-                # else: stay SHORT (ignore redundant SHORT signals)
+                    current_state = 1  # SHORT -> LONG
             
             positions.iloc[i] = current_state
         
         return positions
     
     def _apply_rebalancing(self, positions: pd.Series, frequency: int) -> pd.Series:
-        """
-        Apply rebalancing frequency to positions.
-        
-        Parameters:
-        -----------
-        positions : pd.Series
-            Original positions
-        frequency : int
-            Rebalancing frequency
-            
-        Returns:
-        --------
-        pd.Series
-            Rebalanced positions
-        """
+        """Apply rebalancing frequency to positions."""
         rebalanced = positions.copy()
         
-        # Keep position unchanged between rebalancing periods
         for i in range(1, len(rebalanced)):
             if i % frequency != 0:
                 rebalanced.iloc[i] = rebalanced.iloc[i-1]
@@ -757,44 +509,24 @@ class BacktestEngine:
         return rebalanced
     
     def compare_with_benchmark(self) -> Dict:
-        """
-        Compare strategy performance with buy-and-hold benchmark.
-        
-        Returns:
-        --------
-        Dict
-            Comparison metrics
-        """
+        """Compare strategy performance with buy-and-hold benchmark."""
         if self.returns is None:
             raise ValueError("Run backtest first before comparison")
         
-        # Buy-and-hold returns
         price_returns = self.close.pct_change().fillna(0)
         benchmark_returns = price_returns.loc[self.returns.index]
-        
-        # Calculate benchmark metrics
         benchmark_metrics = Statistics.calculate_all_metrics(benchmark_returns)
         
-        # Calculate outperformance
-        comparison = {
+        return {
             'strategy_metrics': self.metrics,
             'benchmark_metrics': benchmark_metrics,
             'total_return_diff': self.metrics['total_return'] - benchmark_metrics['total_return'],
             'sharpe_diff': self.metrics['sharpe_ratio'] - benchmark_metrics['sharpe_ratio'],
             'max_drawdown_diff': self.metrics['max_drawdown'] - benchmark_metrics['max_drawdown']
         }
-        
-        return comparison
     
     def print_results(self, include_benchmark: bool = True) -> None:
-        """
-        Print formatted backtest results.
-        
-        Parameters:
-        -----------
-        include_benchmark : bool
-            Whether to include benchmark comparison
-        """
+        """Print formatted backtest results."""
         if self.metrics is None:
             raise ValueError("Run backtest first")
         

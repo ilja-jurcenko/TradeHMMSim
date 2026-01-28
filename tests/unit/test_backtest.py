@@ -125,13 +125,13 @@ class TestBacktestEngine(unittest.TestCase):
         # Should have results
         self.assertGreater(len(results['equity_curve']), 0)
         
-    def test_alpha_hmm_override_strategy(self):
-        """Test alpha + HMM override strategy."""
+    def test_alpha_hmm_combine_strategy(self):
+        """Test alpha + HMM combine strategy."""
         hmm_filter = HMMRegimeFilter(n_states=3)
         engine = BacktestEngine(self.prices, self.alpha_model, hmm_filter=hmm_filter)
         
         results = engine.run(
-            strategy_mode='alpha_hmm_override',
+            strategy_mode='alpha_hmm_combine',
             walk_forward=False
         )
         

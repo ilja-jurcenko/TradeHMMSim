@@ -50,7 +50,7 @@ class TestBacktestPlotter(unittest.TestCase):
             },
             'num_trades': 25,
             'initial_capital': 100000,
-            'strategy_mode': 'alpha_hmm_override',
+            'strategy_mode': 'alpha_hmm_combine',
             'alpha_model': 'SMA'
         }
         

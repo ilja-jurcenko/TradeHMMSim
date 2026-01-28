@@ -139,6 +139,194 @@ class BacktestPlotter:
             plt.show()
     
     @staticmethod
+    def plot_hmm_regime_colored_equity(results: dict, close: pd.Series, 
+                                       bear_threshold: float = 0.65,
+                                       bull_threshold: float = 0.65,
+                                       figsize: tuple = (14, 10), 
+                                       save_path: str = None) -> None:
+        """
+        Plot equity price colored by active regime for HMM_Only and Oracle strategies.
+        
+        Colors the equity price line based on which regime probability exceeds the threshold:
+        - Green: Bull regime (bull_prob > threshold)
+        - Orange: Neutral regime (neither bull nor bear exceed threshold)
+        - Red: Bear regime (bear_prob > threshold)
+        
+        Parameters:
+        -----------
+        results : dict
+            Backtest results dictionary from BacktestEngine with regime information
+        close : pd.Series
+            Close price series
+        bear_threshold : float
+            Bear regime probability threshold
+        bull_threshold : float
+            Bull regime probability threshold
+        figsize : tuple
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save the figure. If None, displays the plot.
+        """
+        if 'regime_probs' not in results or 'regime_info' not in results:
+            print("Warning: No regime information found in results. This plot is only for HMM_Only and Oracle strategies.")
+            return
+        
+        probs = results['regime_probs']
+        regime_info = results['regime_info']
+        positions = results['positions']
+        equity_curve = results['equity_curve']
+        
+        # Get regime IDs
+        bear_regime = regime_info['bear_regime']
+        bull_regime = regime_info['bull_regime']
+        neutral_regime = regime_info.get('neutral_regime')
+        
+        # Create figure with 4 subplots
+        fig, axes = plt.subplots(4, 1, figsize=figsize, sharex=True)
+        
+        # Align indices
+        common_idx = probs.index.intersection(close.index)
+        close_aligned = close.loc[common_idx]
+        probs_aligned = probs.loc[common_idx]
+        
+        # Get probabilities
+        bear_prob = probs_aligned[bear_regime]
+        bull_prob = probs_aligned[bull_regime]
+        if neutral_regime is not None:
+            neutral_prob = probs_aligned[neutral_regime]
+            bull_combined_prob = bull_prob + neutral_prob
+        else:
+            bull_combined_prob = bull_prob
+        
+        # Determine active regime for each time point
+        active_regime = pd.Series('Neutral', index=common_idx)
+        active_regime[bear_prob >= bear_threshold] = 'Bear'
+        active_regime[bull_combined_prob > bull_threshold] = 'Bull'
+        
+        # Regime colors
+        regime_colors = {
+            'Bull': '#2ecc71',    # Green
+            'Neutral': '#f39c12',  # Orange
+            'Bear': '#e74c3c'      # Red
+        }
+        
+        # Plot 1: Equity price colored by regime
+        ax1 = axes[0]
+        
+        for i in range(len(close_aligned) - 1):
+            idx = close_aligned.index[i]
+            idx_next = close_aligned.index[i + 1]
+            regime = active_regime.loc[idx]
+            color = regime_colors[regime]
+            
+            ax1.plot([idx, idx_next], 
+                    [close_aligned.iloc[i], close_aligned.iloc[i + 1]], 
+                    color=color, linewidth=1.5, alpha=0.8)
+        
+        ax1.set_ylabel('Price ($)', fontsize=10)
+        ax1.set_title(f'Equity Price Colored by Active Regime ({results.get("strategy_mode", "HMM").upper()})', 
+                     fontsize=12, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend([plt.Line2D([0], [0], color=regime_colors['Bull'], linewidth=2),
+                   plt.Line2D([0], [0], color=regime_colors['Neutral'], linewidth=2),
+                   plt.Line2D([0], [0], color=regime_colors['Bear'], linewidth=2)],
+                  ['Bull Regime (Active)', 'Neutral Regime', 'Bear Regime (Active)'],
+                  loc='upper left', fontsize=9)
+        
+        # Plot 2: Regime probabilities with thresholds
+        ax2 = axes[1]
+        
+        ax2.plot(probs_aligned.index, bear_prob, color='red', linewidth=1.5, 
+                alpha=0.8, label='Bear Prob')
+        ax2.plot(probs_aligned.index, bull_prob, color='green', linewidth=1.5, 
+                alpha=0.8, label='Bull Prob')
+        if neutral_regime is not None:
+            ax2.plot(probs_aligned.index, neutral_prob, color='orange', linewidth=1.5, 
+                    alpha=0.8, label='Neutral Prob')
+        
+        # Add threshold lines
+        ax2.axhline(bear_threshold, color='red', linestyle='--', alpha=0.5, 
+                   linewidth=1, label=f'Bear Threshold ({bear_threshold})')
+        ax2.axhline(bull_threshold, color='green', linestyle='--', alpha=0.5, 
+                   linewidth=1, label=f'Bull Threshold ({bull_threshold})')
+        
+        # Highlight active regimes as background
+        for regime_name, regime_color in regime_colors.items():
+            mask = active_regime == regime_name
+            if mask.any():
+                ax2.fill_between(common_idx, 0, 1, where=mask, 
+                               alpha=0.1, color=regime_color, interpolate=True)
+        
+        ax2.set_ylabel('Probability', fontsize=10)
+        ax2.set_title('Regime Probabilities with Thresholds', fontsize=12, fontweight='bold')
+        ax2.set_ylim([0, 1])
+        ax2.legend(loc='upper left', fontsize=8, ncol=2)
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Positions and equity curve
+        ax3 = axes[2]
+        
+        # Align equity curve
+        equity_aligned = equity_curve.reindex(common_idx, method='ffill')
+        initial_capital = results.get('initial_capital', 100000)
+        equity_pct = (equity_aligned / initial_capital - 1) * 100
+        
+        ax3.plot(common_idx, equity_pct, color='blue', linewidth=2, label='Strategy Return')
+        ax3.axhline(0, color='black', linestyle='-', alpha=0.3, linewidth=0.5)
+        
+        # Highlight when in position
+        positions_aligned = positions.reindex(common_idx, fill_value=0)
+        in_position = positions_aligned > 0
+        if in_position.any():
+            y_min = equity_pct.min()
+            y_max = equity_pct.max()
+            ax3.fill_between(common_idx, y_min, y_max, where=in_position, 
+                           alpha=0.15, color='green', label='In Position', interpolate=True)
+        
+        ax3.set_ylabel('Return (%)', fontsize=10)
+        ax3.set_title('Equity Curve', fontsize=12, fontweight='bold')
+        ax3.legend(loc='upper left', fontsize=9)
+        ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Regime timeline
+        ax4 = axes[3]
+        
+        # Create numeric representation for regimes
+        regime_numeric = pd.Series(1, index=common_idx)  # Default neutral
+        regime_numeric[active_regime == 'Bull'] = 2
+        regime_numeric[active_regime == 'Bear'] = 0
+        
+        # Plot as colored vertical lines
+        for i in range(len(regime_numeric)):
+            idx = regime_numeric.index[i]
+            regime_val = regime_numeric.iloc[i]
+            
+            if regime_val == 2:  # Bull
+                color = regime_colors['Bull']
+            elif regime_val == 1:  # Neutral
+                color = regime_colors['Neutral']
+            else:  # Bear
+                color = regime_colors['Bear']
+            
+            ax4.axvline(x=idx, color=color, alpha=0.6, linewidth=0.5)
+        
+        ax4.set_ylabel('Regime', fontsize=10)
+        ax4.set_xlabel('Date', fontsize=10)
+        ax4.set_title('Regime Timeline', fontsize=12, fontweight='bold')
+        ax4.set_yticks([0, 1, 2])
+        ax4.set_yticklabels(['Bear', 'Neutral', 'Bull'], fontsize=9)
+        ax4.set_ylim([-0.5, 2.5])
+        ax4.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            print(f"HMM regime-colored equity plot saved to {save_path}")
+        else:
+            plt.show()
+    
+    @staticmethod
     def plot_results(results: dict, close: pd.Series, figsize: tuple = (14, 12), save_path: str = None) -> None:
         """
         Plot comprehensive backtest results with 4 subplots.

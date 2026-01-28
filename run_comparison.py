@@ -223,7 +223,7 @@ def run_comparison(ticker = None,
         model = model_class(short_window=model_short, long_window=model_long)
         
         # Strategy 1: Alpha only
-        print(f"\n[1/5] Running {model_name} - Alpha Only...")
+        print(f"\n[1/6] Running {model_name} - Alpha Only...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Note: Multi-asset mode without regime rebalancing (static equal weights)")
         engine_alpha = BacktestEngine(close, model)
@@ -257,7 +257,7 @@ def run_comparison(ticker = None,
         })
         
         # Strategy 2: HMM only
-        print(f"\n[2/5] Running {model_name} - HMM Only...")
+        print(f"\n[2/6] Running {model_name} - HMM Only...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -280,6 +280,16 @@ def run_comparison(ticker = None,
             plot_file = os.path.join(plots_dir, f'{model_name}_HMM_Only.png')
             BacktestPlotter.plot_results(results_hmm, close, save_path=plot_file)
             plt.close('all')
+            
+            # Save regime-colored equity plot
+            plot_file_regime = os.path.join(plots_dir, f'{model_name}_HMM_Only_Regime_Colored.png')
+            BacktestPlotter.plot_hmm_regime_colored_equity(
+                results_hmm, close, 
+                bear_threshold=bear_prob_threshold,
+                bull_threshold=bull_prob_threshold,
+                save_path=plot_file_regime
+            )
+            plt.close('all')
         
         results_list.append({
             'Model': model_name,
@@ -296,8 +306,56 @@ def run_comparison(ticker = None,
             'Time in Market (%)': results_hmm['time_in_market'] * 100
         })
         
-        # Strategy 3: Alpha + HMM Filter
-        print(f"\n[3/5] Running {model_name} - Alpha + HMM Filter...")
+        # Strategy 3: Oracle (HMM-Only with all data, no walk-forward)
+        print(f"\n[3/6] Running {model_name} - Oracle (HMM-Only)...")
+        print("  ⚠️  Oracle mode: Fits HMM on entire dataset (upper bound with future knowledge)")
+        if is_multi_asset and use_regime_rebalancing:
+            print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
+        hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42)
+        engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle)
+        results_oracle = engine_oracle.run(
+            strategy_mode='oracle',
+            bear_prob_threshold=bear_prob_threshold,
+            bull_prob_threshold=bull_prob_threshold,
+            rebalance_frequency=rebalance_frequency,
+            transaction_cost=transaction_cost,
+            enable_logging=enable_logging,
+            log_dir=log_dir if log_dir else 'logs'
+        )
+        
+        # Save individual plot
+        if save_plots:
+            plot_file = os.path.join(plots_dir, f'{model_name}_Oracle.png')
+            BacktestPlotter.plot_results(results_oracle, close, save_path=plot_file)
+            plt.close('all')
+            
+            # Save regime-colored equity plot
+            plot_file_regime = os.path.join(plots_dir, f'{model_name}_Oracle_Regime_Colored.png')
+            BacktestPlotter.plot_hmm_regime_colored_equity(
+                results_oracle, close, 
+                bear_threshold=bear_prob_threshold,
+                bull_threshold=bull_prob_threshold,
+                save_path=plot_file_regime
+            )
+            plt.close('all')
+        
+        results_list.append({
+            'Model': model_name,
+            'Strategy': 'Oracle',
+            'Total Return (%)': results_oracle['metrics']['total_return'] * 100,
+            'Annual Return (%)': results_oracle['metrics']['annualized_return'] * 100,
+            'Sharpe Ratio': results_oracle['metrics']['sharpe_ratio'],
+            'Sortino Ratio': results_oracle['metrics']['sortino_ratio'],
+            'Calmar Ratio': results_oracle['metrics']['calmar_ratio'],
+            'Max Drawdown (%)': results_oracle['metrics']['max_drawdown'] * 100,
+            'Profit Factor': results_oracle['metrics']['profit_factor'],
+            'Win Rate (%)': results_oracle['metrics']['win_rate'] * 100,
+            'Num Trades': results_oracle['num_trades'],
+            'Time in Market (%)': results_oracle['time_in_market'] * 100
+        })
+        
+        # Strategy 4: Alpha + HMM Filter
+        print(f"\n[4/6] Running {model_name} - Alpha + HMM Filter...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -336,8 +394,8 @@ def run_comparison(ticker = None,
             'Time in Market (%)': results_filter['time_in_market'] * 100
         })
         
-        # Strategy 4: Alpha + HMM Combine
-        print(f"\n[4/5] Running {model_name} - Alpha + HMM Combine...")
+        # Strategy 5: Alpha + HMM Combine
+        print(f"\n[5/6] Running {model_name} - Alpha + HMM Combine...")
         if is_multi_asset and use_regime_rebalancing:
             print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
         hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
@@ -381,8 +439,8 @@ def run_comparison(ticker = None,
             'Time in Market (%)': results_combine['time_in_market'] * 100
         })
         
-        # Strategy 5: Regime-Adaptive Alpha (Trend-following in bull/neutral, Bollinger Bands in bear)
-        print(f"\n[5/5] Running {model_name} - Regime-Adaptive Alpha...")
+        # Strategy 6: Regime-Adaptive Alpha (Trend-following in bull/neutral, Bollinger Bands in bear)
+        print(f"\n[6/6] Running {model_name} - Regime-Adaptive Alpha...")
         print("  Bull/Neutral: Trend-following | Bear: Bollinger Bands mean-reversion")
         
         # Create Bollinger Bands model for bear markets
@@ -615,7 +673,7 @@ def run_comparison(ticker = None,
         f.write(f"- **CSV Results:** `comparison_{ticker_filename}_{start_date}_{end_date}.csv`\n")
         if save_plots:
             f.write(f"- **Summary Plots:** `comparison_plots_{ticker_filename}.png`\n")
-            num_plots = len(alpha_models) * 4
+            num_plots = len(alpha_models) * 5
             f.write(f"- **Individual Plots:** `individual_plots/` ({num_plots} plots)\n")
         f.write(f"\n")
     
@@ -679,9 +737,10 @@ def run_comparison(ticker = None,
         
         # Count individual plots
         num_models = len(alpha_models)
-        num_plots = num_models * 6  # 5 strategies + 1 additional 4-state plot for alpha_hmm_combine
+        # 6 strategies + 1 4-state plot (combine) + 2 regime-colored plots (HMM Only + Oracle)
+        num_plots = num_models * 9
         print(f"✓ Individual plots saved to {os.path.join(output_dir, 'individual_plots/')}")
-        print(f"  Total: {num_plots} plots ({num_models} models × 5 strategies + {num_models} 4-state plots)")
+        print(f"  Total: {num_plots} plots ({num_models} models × 6 strategies + {num_models} 4-state plots + {num_models * 2} regime-colored plots)")
     
     return results_df, output_dir
 
