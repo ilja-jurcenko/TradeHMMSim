@@ -15,7 +15,8 @@ class HMMRegimeFilter:
     """
     
     def __init__(self, n_states: int = 3, covariance_type: str = "diag", 
-                 n_iter: int = 100, random_state: int = 42):
+                 n_iter: int = 100, random_state: int = 42,
+                 short_vol_window: int = 10, long_vol_window: int = 30):
         """
         Initialize HMM Regime Filter.
         
@@ -29,16 +30,23 @@ class HMMRegimeFilter:
             Maximum number of iterations for EM algorithm
         random_state : int
             Random seed for reproducibility
+        short_vol_window : int
+            Window for short-term volatility calculation
+        long_vol_window : int
+            Window for long-term volatility calculation
         """
         self.n_states = n_states
         self.covariance_type = covariance_type
         self.n_iter = n_iter
         self.random_state = random_state
+        self.short_vol_window = short_vol_window
+        self.long_vol_window = long_vol_window
         self.model: Optional[GaussianHMM] = None
         self.scaler = StandardScaler()
         self.is_fitted = False
         
-    def make_features(self, close: pd.Series, vol_window: int = 20) -> pd.DataFrame:
+    def make_features(self, close: pd.Series, short_vol_window: Optional[int] = None, 
+                     long_vol_window: Optional[int] = None) -> pd.DataFrame:
         """
         Create features for HMM from close prices.
         
@@ -46,26 +54,36 @@ class HMMRegimeFilter:
         -----------
         close : pd.Series
             Close prices
-        vol_window : int
-            Window for volatility calculation
+        short_vol_window : int, optional
+            Window for short-term volatility calculation (uses self.short_vol_window if None)
+        long_vol_window : int, optional
+            Window for long-term volatility calculation (uses self.long_vol_window if None)
             
         Returns:
         --------
         pd.DataFrame
-            Feature matrix with returns and volatility
+            Feature matrix with returns, short-term volatility, and long-term volatility
         """
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
         
+        # Use instance defaults if not provided
+        short_window = short_vol_window if short_vol_window is not None else self.short_vol_window
+        long_window = long_vol_window if long_vol_window is not None else self.long_vol_window
+        
         # Log returns
         r = np.log(close).diff()
         
-        # Realized volatility (rolling std of returns)
-        rv = r.rolling(vol_window).std()
+        # Short-term realized volatility
+        rv_short = r.rolling(short_window).std()
+        
+        # Long-term realized volatility
+        rv_long = r.rolling(long_window).std()
         
         X = pd.DataFrame({
             'ret': r,
-            'rv': rv
+            'rv_short': rv_short,
+            'rv_long': rv_long
         }).dropna()
         
         return X
@@ -317,7 +335,8 @@ class HMMRegimeFilter:
     
     def walkforward_filter(self, close: pd.Series, 
                           train_window: int = 504,
-                          vol_window: int = 20,
+                          short_vol_window: Optional[int] = None,
+                          long_vol_window: Optional[int] = None,
                           refit_every: int = 21) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
         """
         Walk-forward regime detection with periodic refitting.
@@ -328,8 +347,10 @@ class HMMRegimeFilter:
             Close prices
         train_window : int
             Initial training window size
-        vol_window : int
-            Window for volatility calculation
+        short_vol_window : int, optional
+            Window for short-term volatility calculation (uses instance default if None)
+        long_vol_window : int, optional
+            Window for long-term volatility calculation (uses instance default if None)
         refit_every : int
             Refit model every N periods
             
@@ -339,7 +360,8 @@ class HMMRegimeFilter:
             (probabilities, regime, switches)
         """
         # Create features
-        feats = self.make_features(close, vol_window=vol_window)
+        feats = self.make_features(close, short_vol_window=short_vol_window, 
+                                  long_vol_window=long_vol_window)
         
         # Check if we have enough data
         if len(feats) < train_window:
@@ -410,7 +432,8 @@ class HMMRegimeFilter:
     
     def walkforward_filter_predict_proba(self, close: pd.Series, 
                                         train_window: int = 504,
-                                        vol_window: int = 20,
+                                        short_vol_window: Optional[int] = None,
+                                        long_vol_window: Optional[int] = None,
                                         refit_every: int = 21) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
         """
         Walk-forward regime detection using predict_proba (simpler but slower).
@@ -424,8 +447,10 @@ class HMMRegimeFilter:
             Close prices
         train_window : int
             Initial training window size
-        vol_window : int
-            Window for volatility calculation
+        short_vol_window : int, optional
+            Window for short-term volatility calculation (uses instance default if None)
+        long_vol_window : int, optional
+            Window for long-term volatility calculation (uses instance default if None)
         refit_every : int
             Refit model every N periods
             
@@ -435,7 +460,8 @@ class HMMRegimeFilter:
             (probabilities, regime, switches)
         """
         # Create features
-        feats = self.make_features(close, vol_window=vol_window)
+        feats = self.make_features(close, short_vol_window=short_vol_window,
+                                  long_vol_window=long_vol_window)
         
         # Check if we have enough data
         if len(feats) < train_window:

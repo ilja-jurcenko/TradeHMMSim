@@ -17,7 +17,8 @@ from strategies import (
     OracleStrategy,
     AlphaHMMFilterStrategy,
     AlphaHMMCombineStrategy,
-    RegimeAdaptiveAlphaStrategy
+    RegimeAdaptiveAlphaStrategy,
+    AlphaOracleStrategy
 )
 
 
@@ -33,7 +34,8 @@ class BacktestEngine:
         'oracle': OracleStrategy,
         'alpha_hmm_filter': AlphaHMMFilterStrategy,
         'alpha_hmm_combine': AlphaHMMCombineStrategy,
-        'regime_adaptive_alpha': RegimeAdaptiveAlphaStrategy
+        'regime_adaptive_alpha': RegimeAdaptiveAlphaStrategy,
+        'alpha_oracle': AlphaOracleStrategy
     }
     
     def __init__(self, close: pd.Series, 
@@ -191,6 +193,12 @@ class BacktestEngine:
             positions = self._run_alpha_only(strategy, alpha_signals)
             log_data = self._log_alpha_only(strategy, positions, alpha_signals, enable_logging)
             state_info = None
+        
+        elif strategy_mode == 'alpha_oracle':
+            # Oracle timing strategy - ignores alpha signals, uses price action only
+            positions = self._run_alpha_oracle(strategy, alpha_signals)
+            log_data = self._log_alpha_oracle(strategy, positions, alpha_signals, enable_logging)
+            state_info = None
             
         elif strategy_mode in ['hmm_only', 'oracle', 'alpha_hmm_filter', 
                                'alpha_hmm_combine', 'regime_adaptive_alpha']:
@@ -252,6 +260,33 @@ class BacktestEngine:
             positions, self.close, alpha_signals, positions.index
         )
     
+    def _run_alpha_oracle(self, strategy, alpha_signals: pd.Series) -> pd.Series:
+        """Run alpha oracle timing strategy."""
+        positions = strategy.generate_positions(
+            alpha_signals, self.close, alpha_signals.index
+        )
+        
+        # Print pivot information
+        pivot_info = strategy.get_pivot_info(self.close, alpha_signals.index)
+        print(f"\nZigZag Pivot Analysis:")
+        print(f"  Min Move Threshold: {pivot_info['min_move_threshold_pct']:.2f}%")
+        print(f"  Total Pivots Identified: {pivot_info['num_pivots']}")
+        print(f"  BUY Signals: {pivot_info['num_buys']}")
+        print(f"  SELL Signals: {pivot_info['num_sells']}")
+        print(f"  Average Swing Size: {pivot_info['avg_swing_pct']:.2f}%")
+        
+        return positions
+    
+    def _log_alpha_oracle(self, strategy, positions: pd.Series, 
+                         alpha_signals: pd.Series, enable_logging: bool):
+        """Generate log data for alpha oracle strategy."""
+        if not enable_logging:
+            return None
+        
+        return strategy.generate_log_data(
+            positions, self.close, alpha_signals, positions.index
+        )
+    
     def _run_hmm_strategy(self, strategy, strategy_mode: str, alpha_signals: pd.Series,
                          walk_forward: bool, train_window: int, refit_every: int,
                          bear_prob_threshold: float, bull_prob_threshold: float,
@@ -303,7 +338,7 @@ class BacktestEngine:
             positions, state_data = strategy.generate_positions(
                 alpha_signals_aligned, self.close, common_idx, **kwargs
             )
-            
+
             # Store momentum-based state info
             state_info = {
                 'bull_prob_momentum': state_data['bull_prob_momentum'],

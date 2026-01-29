@@ -5,6 +5,8 @@ Main script to compare the impact of HMM model with AlphaModels.
 import pandas as pd
 import numpy as np
 import os
+import json
+import shutil
 from datetime import datetime
 from portfolio import Portfolio
 from backtest import BacktestEngine
@@ -18,6 +20,112 @@ from config_loader import ConfigLoader
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for saving plots
 import matplotlib.pyplot as plt
+
+
+def calculate_timing_metrics(strategy_positions: pd.Series, oracle_positions: pd.Series, 
+                             close: pd.Series) -> dict:
+    """
+    Calculate timing quality metrics by comparing strategy signals to oracle signals.
+    
+    Parameters:
+    -----------
+    strategy_positions : pd.Series
+        Strategy position series (0 or 1)
+    oracle_positions : pd.Series
+        Oracle position series (0 or 1)
+    close : pd.Series
+        Close price series
+        
+    Returns:
+    --------
+    dict
+        Dictionary with timing metrics:
+        - entry_timing_avg: Average bars early (negative) or late (positive) for entries
+        - exit_timing_avg: Average bars early (negative) or late (positive) for exits
+        - coverage_pct: % of oracle bull periods captured
+        - false_entries: Number of entries during oracle bear periods
+        - false_exits: Number of exits during oracle bull periods
+        - entry_timing_std: Std dev of entry timing
+        - exit_timing_std: Std dev of exit timing
+    """
+    # Align indices
+    common_idx = strategy_positions.index.intersection(oracle_positions.index)
+    strat_pos = strategy_positions.loc[common_idx]
+    oracle_pos = oracle_positions.loc[common_idx]
+    
+    # Identify oracle entries (0 -> 1) and exits (1 -> 0)
+    oracle_entries = []
+    oracle_exits = []
+    for i in range(1, len(oracle_pos)):
+        if oracle_pos.iloc[i] == 1 and oracle_pos.iloc[i-1] == 0:
+            oracle_entries.append(i)
+        elif oracle_pos.iloc[i] == 0 and oracle_pos.iloc[i-1] == 1:
+            oracle_exits.append(i)
+    
+    # Identify strategy entries and exits
+    strategy_entries = []
+    strategy_exits = []
+    for i in range(1, len(strat_pos)):
+        if strat_pos.iloc[i] == 1 and strat_pos.iloc[i-1] == 0:
+            strategy_entries.append(i)
+        elif strat_pos.iloc[i] == 0 and strat_pos.iloc[i-1] == 1:
+            strategy_exits.append(i)
+    
+    # Calculate entry timing: for each oracle entry, find closest strategy entry
+    entry_timings = []
+    for oracle_entry_idx in oracle_entries:
+        if not strategy_entries:
+            continue
+        # Find closest strategy entry
+        distances = [s_idx - oracle_entry_idx for s_idx in strategy_entries]
+        closest_idx = min(range(len(distances)), key=lambda i: abs(distances[i]))
+        timing = distances[closest_idx]
+        entry_timings.append(timing)
+    
+    # Calculate exit timing: for each oracle exit, find closest strategy exit
+    exit_timings = []
+    for oracle_exit_idx in oracle_exits:
+        if not strategy_exits:
+            continue
+        # Find closest strategy exit
+        distances = [s_idx - oracle_exit_idx for s_idx in strategy_exits]
+        closest_idx = min(range(len(distances)), key=lambda i: abs(distances[i]))
+        timing = distances[closest_idx]
+        exit_timings.append(timing)
+    
+    # Calculate coverage: % of oracle bull periods where strategy was also long
+    oracle_bull_periods = (oracle_pos == 1).sum()
+    if oracle_bull_periods > 0:
+        strategy_in_oracle_bull = ((oracle_pos == 1) & (strat_pos == 1)).sum()
+        coverage_pct = (strategy_in_oracle_bull / oracle_bull_periods) * 100
+    else:
+        coverage_pct = 0.0
+    
+    # Calculate false entries: entries when oracle was in bear (0)
+    false_entries = 0
+    for s_idx in strategy_entries:
+        if oracle_pos.iloc[s_idx] == 0:
+            false_entries += 1
+    
+    # Calculate false exits: exits when oracle was in bull (1)
+    false_exits = 0
+    for s_idx in strategy_exits:
+        if oracle_pos.iloc[s_idx] == 1:
+            false_exits += 1
+    
+    return {
+        'entry_timing_avg': np.mean(entry_timings) if entry_timings else 0.0,
+        'entry_timing_std': np.std(entry_timings) if entry_timings else 0.0,
+        'exit_timing_avg': np.mean(exit_timings) if exit_timings else 0.0,
+        'exit_timing_std': np.std(exit_timings) if exit_timings else 0.0,
+        'coverage_pct': coverage_pct,
+        'false_entries': false_entries,
+        'false_exits': false_exits,
+        'oracle_entries': len(oracle_entries),
+        'oracle_exits': len(oracle_exits),
+        'strategy_entries': len(strategy_entries),
+        'strategy_exits': len(strategy_exits)
+    }
 
 
 def run_comparison(ticker = None, 
@@ -81,7 +189,7 @@ def run_comparison(ticker = None,
     strategies : list, optional
         List of strategy names to run. If None, runs all strategies.
         Valid values: ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
-                       'alpha_hmm_combine', 'regime_adaptive_alpha']
+                       'alpha_hmm_combine', 'regime_adaptive_alpha', 'alpha_oracle']
         
     Returns:
     --------
@@ -148,10 +256,15 @@ def run_comparison(ticker = None,
             output_dir = output_dir_cfg
         train_window = config.get('hmm', {}).get('train_window', train_window)
         refit_every = config.get('hmm', {}).get('refit_every', refit_every)
+        short_vol_window = config.get('hmm', {}).get('short_vol_window', 10)
+        long_vol_window = config.get('hmm', {}).get('long_vol_window', 30)
         bear_prob_threshold = config.get('hmm', {}).get('bear_prob_threshold', bear_prob_threshold)
         bull_prob_threshold = config.get('hmm', {}).get('bull_prob_threshold', bull_prob_threshold)
     else:
         config = None
+        # Set defaults for volatility windows when no config provided
+        short_vol_window = 10
+        long_vol_window = 30
     
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
@@ -168,6 +281,60 @@ def run_comparison(ticker = None,
     
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nOutput directory: {output_dir}")
+    
+    # Save configuration files for reproducibility
+    if config_path is not None:
+        # Copy original config file
+        config_filename = os.path.basename(config_path)
+        config_copy_path = os.path.join(output_dir, f'original_{config_filename}')
+        shutil.copy2(config_path, config_copy_path)
+        print(f"✓ Original config saved to: {config_copy_path}")
+    
+    # Save runtime configuration (actual parameters used)
+    runtime_config = {
+        'run_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'data': {
+            'ticker': ticker,
+            'start_date': start_date,
+            'end_date': end_date
+        },
+        'backtest': {
+            'initial_capital': 100000.0,
+            'rebalance_frequency': rebalance_frequency,
+            'transaction_cost': transaction_cost,
+            'use_regime_rebalancing': use_regime_rebalancing
+        },
+        'hmm': {
+            'n_states': 3,
+            'random_state': 42,
+            'train_window': train_window,
+            'refit_every': refit_every,
+            'short_vol_window': short_vol_window,
+            'long_vol_window': long_vol_window,
+            'bear_prob_threshold': bear_prob_threshold,
+            'bull_prob_threshold': bull_prob_threshold
+        },
+        'alpha_model': {
+            'short_window': short_window,
+            'long_window': long_window
+        },
+        'output': {
+            'save_plots': save_plots,
+            'output_dir': output_dir,
+            'enable_logging': enable_logging
+        },
+        'strategies': strategies,
+        'config_source': config_path if config_path else 'command_line_defaults'
+    }
+    
+    # Add alpha models info if available
+    if alpha_models is not None:
+        runtime_config['alpha_models'] = [model.__name__ for model in alpha_models]
+    
+    runtime_config_path = os.path.join(output_dir, 'runtime_config.json')
+    with open(runtime_config_path, 'w') as f:
+        json.dump(runtime_config, f, indent=2)
+    print(f"✓ Runtime config saved to: {runtime_config_path}")
     
     # Create subdirectory for logs if logging enabled
     log_dir = None
@@ -188,11 +355,11 @@ def run_comparison(ticker = None,
     # Default strategies
     if strategies is None:
         strategies = ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
-                      'alpha_hmm_combine', 'regime_adaptive_alpha']
+                      'alpha_hmm_combine', 'regime_adaptive_alpha', 'alpha_oracle']
     
     # Validate strategies
     valid_strategies = ['alpha_only', 'hmm_only', 'oracle', 'alpha_hmm_filter', 
-                        'alpha_hmm_combine', 'regime_adaptive_alpha']
+                        'alpha_hmm_combine', 'regime_adaptive_alpha', 'alpha_oracle']
     for strategy in strategies:
         if strategy not in valid_strategies:
             raise ValueError(f"Invalid strategy: {strategy}. Valid strategies: {valid_strategies}")
@@ -215,12 +382,40 @@ def run_comparison(ticker = None,
     
     # Initialize HMM filter
     print("\nInitializing HMM regime filter...")
-    hmm_filter = HMMRegimeFilter(n_states=3, random_state=42)
+    hmm_filter = HMMRegimeFilter(n_states=3, random_state=42, 
+                                 short_vol_window=short_vol_window,
+                                 long_vol_window=long_vol_window)
     
     # Storage for results
     results_list = []
     
-    # Test each alpha model with different strategies
+    # Step 1: Run Alpha Oracle FIRST to get reference signals for timing evaluation
+    print("\n" + "="*80)
+    print("STEP 1: COLLECTING ALPHA ORACLE REFERENCE SIGNALS")
+    print("="*80)
+    print("Running Oracle strategy to establish ideal timing baseline...")
+    
+    # Use first alpha model for oracle (doesn't matter which since oracle ignores alpha signals)
+    oracle_model = alpha_models[0](short_window=short_window, long_window=long_window)
+    oracle_engine = BacktestEngine(close, oracle_model)
+    oracle_results = oracle_engine.run(
+        strategy_mode='alpha_oracle',
+        rebalance_frequency=rebalance_frequency,
+        transaction_cost=transaction_cost,
+        enable_logging=False
+    )
+    oracle_positions = oracle_results['positions']
+    
+    print(f"\n✓ Oracle baseline established:")
+    print(f"  Total Return: {oracle_results['metrics']['total_return']*100:.2f}%")
+    print(f"  Number of Trades: {oracle_results['num_trades']}")
+    print(f"  Win Rate: {oracle_results['metrics']['win_rate']*100:.1f}%")
+    
+    # Step 2: Test each alpha model with different strategies
+    print("\n" + "="*80)
+    print("STEP 2: EVALUATING STRATEGIES AGAINST ORACLE BASELINE")
+    print("="*80)
+    
     for model_class in alpha_models:
         model_name = model_class.__name__
         print(f"\n{'='*80}")
@@ -261,6 +456,9 @@ def run_comparison(ticker = None,
                 BacktestPlotter.plot_results(results_alpha, close, save_path=plot_file)
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_alpha['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'Alpha Only',
@@ -273,7 +471,12 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_alpha['metrics']['profit_factor'],
                 'Win Rate (%)': results_alpha['metrics']['win_rate'] * 100,
                 'Num Trades': results_alpha['num_trades'],
-                'Time in Market (%)': results_alpha['time_in_market'] * 100
+                'Time in Market (%)': results_alpha['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
         
         # Strategy 2: HMM only
@@ -283,7 +486,9 @@ def run_comparison(ticker = None,
             print(f"\n[2/6] Running {model_name} - HMM Only...")
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             short_vol_window=short_vol_window,
+                                             long_vol_window=long_vol_window)
             engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
             results_hmm = engine_hmm.run(
                 strategy_mode='hmm_only',
@@ -314,6 +519,9 @@ def run_comparison(ticker = None,
                 )
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_hmm['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'HMM Only',
@@ -326,7 +534,12 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_hmm['metrics']['profit_factor'],
                 'Win Rate (%)': results_hmm['metrics']['win_rate'] * 100,
                 'Num Trades': results_hmm['num_trades'],
-                'Time in Market (%)': results_hmm['time_in_market'] * 100
+                'Time in Market (%)': results_hmm['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
         
         # Strategy 3: Oracle (HMM-Only with all data, no walk-forward)
@@ -337,7 +550,9 @@ def run_comparison(ticker = None,
             print("  ⚠️  Oracle mode: Fits HMM on entire dataset (upper bound with future knowledge)")
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-            hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42)
+            hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42,
+                                                short_vol_window=short_vol_window,
+                                                long_vol_window=long_vol_window)
             engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle)
             results_oracle = engine_oracle.run(
                 strategy_mode='oracle',
@@ -365,6 +580,9 @@ def run_comparison(ticker = None,
                 )
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_oracle['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'Oracle',
@@ -377,7 +595,12 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_oracle['metrics']['profit_factor'],
                 'Win Rate (%)': results_oracle['metrics']['win_rate'] * 100,
                 'Num Trades': results_oracle['num_trades'],
-                'Time in Market (%)': results_oracle['time_in_market'] * 100
+                'Time in Market (%)': results_oracle['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
         
         # Strategy 4: Alpha + HMM Filter
@@ -387,7 +610,9 @@ def run_comparison(ticker = None,
             print(f"\n[4/6] Running {model_name} - Alpha + HMM Filter...")
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             short_vol_window=short_vol_window,
+                                             long_vol_window=long_vol_window)
             engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
             results_filter = engine_filter.run(
                 strategy_mode='alpha_hmm_filter',
@@ -408,6 +633,9 @@ def run_comparison(ticker = None,
                 BacktestPlotter.plot_results(results_filter, close, save_path=plot_file)
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_filter['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'Alpha + HMM Filter',
@@ -420,7 +648,12 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_filter['metrics']['profit_factor'],
                 'Win Rate (%)': results_filter['metrics']['win_rate'] * 100,
                 'Num Trades': results_filter['num_trades'],
-                'Time in Market (%)': results_filter['time_in_market'] * 100
+                'Time in Market (%)': results_filter['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
         
         # Strategy 5: Alpha + HMM Combine
@@ -430,7 +663,9 @@ def run_comparison(ticker = None,
             print(f"\n[5/6] Running {model_name} - Alpha + HMM Combine...")
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             short_vol_window=short_vol_window,
+                                             long_vol_window=long_vol_window)
             engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
             results_combine = engine_combine.run(
                 strategy_mode='alpha_hmm_combine',
@@ -456,6 +691,9 @@ def run_comparison(ticker = None,
                 BacktestPlotter.plot_4state_strategy(results_combine, close, save_path=plot_file_4state)
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_combine['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'Alpha + HMM Combine',
@@ -468,7 +706,12 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_combine['metrics']['profit_factor'],
                 'Win Rate (%)': results_combine['metrics']['win_rate'] * 100,
                 'Num Trades': results_combine['num_trades'],
-                'Time in Market (%)': results_combine['time_in_market'] * 100
+                'Time in Market (%)': results_combine['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
         
         # Strategy 6: Regime-Adaptive Alpha (Trend-following in bull/neutral, Bollinger Bands in bear)
@@ -481,7 +724,9 @@ def run_comparison(ticker = None,
             # Create Bollinger Bands model for bear markets
             bb_model = BollingerBands(short_window=20, long_window=2)
             
-            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42)
+            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             short_vol_window=short_vol_window,
+                                             long_vol_window=long_vol_window)
             engine_adaptive = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
                                             bear_alpha_model=bb_model)
             results_adaptive = engine_adaptive.run(
@@ -503,6 +748,9 @@ def run_comparison(ticker = None,
                 BacktestPlotter.plot_results(results_adaptive, close, save_path=plot_file)
                 plt.close('all')
             
+            # Calculate timing metrics vs oracle
+            timing_metrics = calculate_timing_metrics(results_adaptive['positions'], oracle_positions, close)
+            
             results_list.append({
                 'Model': model_name,
                 'Strategy': 'Regime-Adaptive Alpha',
@@ -515,7 +763,57 @@ def run_comparison(ticker = None,
                 'Profit Factor': results_adaptive['metrics']['profit_factor'],
                 'Win Rate (%)': results_adaptive['metrics']['win_rate'] * 100,
                 'Num Trades': results_adaptive['num_trades'],
-                'Time in Market (%)': results_adaptive['time_in_market'] * 100
+                'Time in Market (%)': results_adaptive['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
+            })
+        
+        # Strategy 7: Alpha Oracle (ZigZag Timing Labels)
+        if 'alpha_oracle' not in strategies:
+            print(f"\n[7/7] Skipping {model_name} - Alpha Oracle...")
+        else:
+            print(f"\n[7/7] Running {model_name} - Alpha Oracle (ZigZag Timing Labels)...")
+            print("  Ideal timing benchmark based on local price extrema")
+            
+            engine_alpha_oracle = BacktestEngine(close, model)
+            results_alpha_oracle = engine_alpha_oracle.run(
+                strategy_mode='alpha_oracle',
+                rebalance_frequency=rebalance_frequency,
+                transaction_cost=transaction_cost,
+                enable_logging=enable_logging,
+                log_dir=log_dir
+            )
+            
+            # Save individual plot
+            if save_plots:
+                plot_file = os.path.join(plots_dir, f'{model_name}_Alpha_Oracle.png')
+                BacktestPlotter.plot_results(results_alpha_oracle, close, save_path=plot_file)
+                plt.close('all')
+            
+            # Calculate timing metrics vs oracle (should be perfect)
+            timing_metrics = calculate_timing_metrics(results_alpha_oracle['positions'], oracle_positions, close)
+            
+            results_list.append({
+                'Model': model_name,
+                'Strategy': 'Alpha Oracle',
+                'Total Return (%)': results_alpha_oracle['metrics']['total_return'] * 100,
+                'Annual Return (%)': results_alpha_oracle['metrics']['annualized_return'] * 100,
+                'Sharpe Ratio': results_alpha_oracle['metrics']['sharpe_ratio'],
+                'Sortino Ratio': results_alpha_oracle['metrics']['sortino_ratio'],
+                'Calmar Ratio': results_alpha_oracle['metrics']['calmar_ratio'],
+                'Max Drawdown (%)': results_alpha_oracle['metrics']['max_drawdown'] * 100,
+                'Profit Factor': results_alpha_oracle['metrics']['profit_factor'],
+                'Win Rate (%)': results_alpha_oracle['metrics']['win_rate'] * 100,
+                'Num Trades': results_alpha_oracle['num_trades'],
+                'Time in Market (%)': results_alpha_oracle['time_in_market'] * 100,
+                'Entry Timing (bars)': timing_metrics['entry_timing_avg'],
+                'Exit Timing (bars)': timing_metrics['exit_timing_avg'],
+                'Coverage (%)': timing_metrics['coverage_pct'],
+                'False Entries': timing_metrics['false_entries'],
+                'False Exits': timing_metrics['false_exits']
             })
     
     # Create results DataFrame
@@ -542,24 +840,55 @@ def run_comparison(ticker = None,
     print("\n" + "="*80)
     print("COMPARISON RESULTS")
     print("="*80)
+    
+    # Separate Oracle results from competitive strategies
+    oracle_results = results_df[results_df['Strategy'] == 'Alpha Oracle']
+    competitive_results = results_df[results_df['Strategy'] != 'Alpha Oracle']
+    
     print("\nTop 10 Strategies by Total Return:")
-    print(results_df.sort_values('Total Return (%)', ascending=False).head(10).to_string(index=False))
+    print(competitive_results.sort_values('Total Return (%)', ascending=False).head(10).to_string(index=False))
     
     print("\nTop 10 Strategies by Sharpe Ratio:")
-    print(results_df.sort_values('Sharpe Ratio', ascending=False).head(10)[
+    print(competitive_results.sort_values('Sharpe Ratio', ascending=False).head(10)[
         ['Model', 'Strategy', 'Total Return (%)', 'Sharpe Ratio', 'Max Drawdown (%)']
     ].to_string(index=False))
     
     print("\nTop 10 Strategies by Calmar Ratio:")
-    print(results_df.sort_values('Calmar Ratio', ascending=False).head(10)[
+    print(competitive_results.sort_values('Calmar Ratio', ascending=False).head(10)[
         ['Model', 'Strategy', 'Total Return (%)', 'Calmar Ratio', 'Max Drawdown (%)']
     ].to_string(index=False))
     
-    # Calculate average performance by strategy type
+    # Print timing quality analysis (exclude Oracle from comparisons)
+    print("\n" + "="*80)
+    print("TIMING QUALITY ANALYSIS (vs Alpha Oracle)")
+    print("="*80)
+    print("\nBest Entry Timing (closest to oracle entries, negative = early):")
+    print(competitive_results.sort_values('Entry Timing (bars)', key=abs).head(10)[
+        ['Model', 'Strategy', 'Entry Timing (bars)', 'Coverage (%)', 'False Entries']
+    ].to_string(index=False))
+    
+    print("\nBest Exit Timing (closest to oracle exits, negative = early):")
+    print(competitive_results.sort_values('Exit Timing (bars)', key=abs).head(10)[
+        ['Model', 'Strategy', 'Exit Timing (bars)', 'False Exits']
+    ].to_string(index=False))
+    
+    print("\nBest Coverage (% of oracle bull periods captured):")
+    print(competitive_results.sort_values('Coverage (%)', ascending=False).head(10)[
+        ['Model', 'Strategy', 'Coverage (%)', 'Entry Timing (bars)', 'Total Return (%)']
+    ].to_string(index=False))
+    
+    print("\nFewest False Signals:")
+    competitive_results_copy = competitive_results.copy()
+    competitive_results_copy['Total False Signals'] = competitive_results_copy['False Entries'] + competitive_results_copy['False Exits']
+    print(competitive_results_copy.sort_values('Total False Signals').head(10)[
+        ['Model', 'Strategy', 'False Entries', 'False Exits', 'Total False Signals', 'Sharpe Ratio']
+    ].to_string(index=False))
+    
+    # Calculate average performance by strategy type (exclude Oracle)
     print("\n" + "="*80)
     print("AVERAGE PERFORMANCE BY STRATEGY TYPE")
     print("="*80)
-    avg_by_strategy = results_df.groupby('Strategy').agg({
+    avg_by_strategy = competitive_results.groupby('Strategy').agg({
         'Total Return (%)': 'mean',
         'Sharpe Ratio': 'mean',
         'Calmar Ratio': 'mean',
@@ -662,11 +991,44 @@ def run_comparison(ticker = None,
         f.write(f"- **Max Drawdown:** {benchmark_metrics['max_drawdown']*100:.2f}%\n\n")
         f.write(f"---\n\n")
         
+        # Oracle reference performance
+        if len(oracle_results) > 0:
+            f.write(f"## Oracle Reference Performance\n\n")
+            f.write(f"*Alpha Oracle represents ideal timing based on local price extrema (ZigZag). ")
+            f.write(f"This is a theoretical benchmark, not a tradable strategy.*\n\n")
+            
+            # Show average oracle performance across models
+            oracle_avg = oracle_results.agg({
+                'Total Return (%)': 'mean',
+                'Annual Return (%)': 'mean',
+                'Sharpe Ratio': 'mean',
+                'Max Drawdown (%)': 'mean',
+                'Num Trades': 'mean',
+                'Win Rate (%)': 'mean'
+            })
+            
+            f.write(f"### Average Oracle Performance (across {len(oracle_results)} models)\n\n")
+            f.write(f"- **Total Return:** {oracle_avg['Total Return (%)']:.2f}%\n")
+            f.write(f"- **Annual Return:** {oracle_avg['Annual Return (%)']:.2f}%\n")
+            f.write(f"- **Sharpe Ratio:** {oracle_avg['Sharpe Ratio']:.2f}\n")
+            f.write(f"- **Max Drawdown:** {oracle_avg['Max Drawdown (%)']:.2f}%\n")
+            f.write(f"- **Avg Trades:** {oracle_avg['Num Trades']:.0f}\n")
+            f.write(f"- **Win Rate:** {oracle_avg['Win Rate (%)']:.1f}%\n\n")
+            
+            f.write(f"### Individual Oracle Results\n\n")
+            f.write("| Model | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Num Trades | Win Rate (%) |\n")
+            f.write("|-------|------------------|--------------|------------------|------------|--------------|\n")
+            for _, row in oracle_results.iterrows():
+                f.write(f"| {row['Model']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} | {row['Win Rate (%)']:.1f} |\n")
+            f.write("\n")
+        
+        f.write(f"---\n\n")
+        
         # Top strategies
         f.write(f"## Top 10 Strategies by Total Return\n\n")
         f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Num Trades |\n")
         f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
-        for _, row in results_df.sort_values('Total Return (%)', ascending=False).head(10).iterrows():
+        for _, row in competitive_results.sort_values('Total Return (%)', ascending=False).head(10).iterrows():
             f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
@@ -674,7 +1036,7 @@ def run_comparison(ticker = None,
         f.write(f"## Top 10 Strategies by Sharpe Ratio\n\n")
         f.write("| Model | Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Num Trades |\n")
         f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
-        for _, row in results_df.sort_values('Sharpe Ratio', ascending=False).head(10).iterrows():
+        for _, row in competitive_results.sort_values('Sharpe Ratio', ascending=False).head(10).iterrows():
             f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Sharpe Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
@@ -682,7 +1044,7 @@ def run_comparison(ticker = None,
         f.write(f"## Top 10 Strategies by Calmar Ratio\n\n")
         f.write("| Model | Strategy | Total Return (%) | Calmar Ratio | Max Drawdown (%) | Num Trades |\n")
         f.write("|-------|----------|------------------|--------------|------------------|------------|\n")
-        for _, row in results_df.sort_values('Calmar Ratio', ascending=False).head(10).iterrows():
+        for _, row in competitive_results.sort_values('Calmar Ratio', ascending=False).head(10).iterrows():
             f.write(f"| {row['Model']} | {row['Strategy']} | {row['Total Return (%)']:.2f} | {row['Calmar Ratio']:.2f} | {row['Max Drawdown (%)']:.2f} | {row['Num Trades']:.0f} |\n")
         f.write("\n")
         
@@ -715,6 +1077,46 @@ def run_comparison(ticker = None,
             f.write(f"## HMM Impact Analysis\n\n")
             f.write(f"*Skipped: Requires all strategies (Alpha Only, HMM Only, Alpha + HMM Filter, Alpha + HMM Combine)*\n\n")
         
+        # Timing Quality Analysis
+        f.write(f"---\n\n")
+        f.write(f"## Timing Quality Analysis\n\n")
+        f.write(f"This section compares competitive strategies against the Alpha Oracle baseline. ")
+        f.write(f"For complete timing analysis of all strategies, see [TIMING_ANALYSIS.md](TIMING_ANALYSIS.md).\n\n")
+        
+        f.write(f"### Best Entry Timing\n\n")
+        f.write("| Model | Strategy | Entry Timing (bars) | Coverage (%) | False Entries |\n")
+        f.write("|-------|----------|---------------------|--------------|---------------|\n")
+        for _, row in competitive_results.sort_values('Entry Timing (bars)', key=abs).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Entry Timing (bars)']:.1f} | {row['Coverage (%)']:.1f} | {row['False Entries']:.0f} |\n")
+        f.write("\n")
+        f.write("*Negative values = early entry, Positive values = late entry*\n\n")
+        
+        f.write(f"### Best Exit Timing\n\n")
+        f.write("| Model | Strategy | Exit Timing (bars) | False Exits |\n")
+        f.write("|-------|----------|-----------------------|-------------|\n")
+        for _, row in competitive_results.sort_values('Exit Timing (bars)', key=abs).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Exit Timing (bars)']:.1f} | {row['False Exits']:.0f} |\n")
+        f.write("\n")
+        f.write("*Negative values = early exit, Positive values = late exit*\n\n")
+        
+        f.write(f"### Best Coverage\n\n")
+        f.write("| Model | Strategy | Coverage (%) | Entry Timing (bars) | Total Return (%) |\n")
+        f.write("|-------|----------|--------------|---------------------|------------------|\n")
+        for _, row in competitive_results.sort_values('Coverage (%)', ascending=False).head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['Coverage (%)']:.1f} | {row['Entry Timing (bars)']:.1f} | {row['Total Return (%)']:.2f} |\n")
+        f.write("\n")
+        f.write("*Coverage = % of oracle bull periods where strategy was also long*\n\n")
+        
+        f.write(f"### Fewest False Signals\n\n")
+        competitive_results_copy = competitive_results.copy()
+        competitive_results_copy['Total False Signals'] = competitive_results_copy['False Entries'] + competitive_results_copy['False Exits']
+        f.write("| Model | Strategy | False Entries | False Exits | Total False | Sharpe Ratio |\n")
+        f.write("|-------|----------|---------------|-------------|-------------|---------------|\n")
+        for _, row in competitive_results_copy.sort_values('Total False Signals').head(10).iterrows():
+            f.write(f"| {row['Model']} | {row['Strategy']} | {row['False Entries']:.0f} | {row['False Exits']:.0f} | {row['Total False Signals']:.0f} | {row['Sharpe Ratio']:.2f} |\n")
+        f.write("\n")
+        f.write("*False Entries = entries during oracle bear periods | False Exits = exits during oracle bull periods*\n\n")
+        
         # Files generated
         f.write(f"---\n\n")
         f.write(f"## Generated Files\n\n")
@@ -726,6 +1128,137 @@ def run_comparison(ticker = None,
         f.write(f"\n")
     
     print(f"✓ Analysis report saved to {md_file}")
+    
+    # Create separate timing analysis report with ALL strategies
+    timing_md_file = os.path.join(output_dir, 'TIMING_ANALYSIS.md')
+    with open(timing_md_file, 'w') as f:
+        f.write(f"# Complete Timing Quality Analysis\n\n")
+        f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"**Period:** {start_date} to {end_date}\n\n")
+        f.write(f"---\n\n")
+        
+        f.write(f"## Overview\n\n")
+        f.write(f"This report provides complete timing analysis for all tested strategies compared against ")
+        f.write(f"the Alpha Oracle baseline. The Alpha Oracle identifies ideal entry/exit points based on ")
+        f.write(f"local price extrema using a ZigZag algorithm (5% minimum move).\n\n")
+        
+        f.write(f"### Timing Metrics Explanation\n\n")
+        f.write(f"- **Entry Timing (bars)**: Average bars early (-) or late (+) compared to oracle BUYs\n")
+        f.write(f"- **Exit Timing (bars)**: Average bars early (-) or late (+) compared to oracle SELLs\n")
+        f.write(f"- **Coverage (%)**: Percentage of oracle bull periods captured by strategy\n")
+        f.write(f"- **False Entries**: Number of entries when oracle was in bear (cash) position\n")
+        f.write(f"- **False Exits**: Number of exits when oracle was still in bull position\n\n")
+        
+        f.write(f"---\n\n")
+        
+        # Oracle baseline reference
+        if len(oracle_results) > 0:
+            f.write(f"## Oracle Baseline\n\n")
+            f.write(f"*The Alpha Oracle represents theoretical perfect timing and is not included in competitive rankings.*\n\n")
+            
+            oracle_avg = oracle_results.agg({
+                'Total Return (%)': 'mean',
+                'Num Trades': 'mean',
+                'Win Rate (%)': 'mean'
+            })
+            
+            f.write(f"### Average Oracle Performance\n")
+            f.write(f"- **Total Return:** {oracle_avg['Total Return (%)']:.2f}%\n")
+            f.write(f"- **Avg Trades:** {oracle_avg['Num Trades']:.0f}\n")
+            f.write(f"- **Win Rate:** {oracle_avg['Win Rate (%)']:.1f}%\n\n")
+            f.write(f"---\n\n")
+        
+        # All strategies timing analysis
+        f.write(f"## Complete Timing Analysis - All Strategies\n\n")
+        f.write(f"Total strategies analyzed: {len(competitive_results)}\n\n")
+        
+        # Sort by multiple criteria
+        f.write(f"### Sorted by Entry Timing (Absolute Value)\n\n")
+        f.write("| Rank | Model | Strategy | Entry Timing | Coverage (%) | False Entries | Total Return (%) |\n")
+        f.write("|------|-------|----------|--------------|--------------|---------------|------------------|\n")
+        for rank, (_, row) in enumerate(competitive_results.sort_values('Entry Timing (bars)', key=abs).iterrows(), 1):
+            f.write(f"| {rank} | {row['Model']} | {row['Strategy']} | {row['Entry Timing (bars)']:.1f} | ")
+            f.write(f"{row['Coverage (%)']:.1f} | {row['False Entries']:.0f} | {row['Total Return (%)']:.2f} |\n")
+        f.write("\n")
+        
+        f.write(f"### Sorted by Exit Timing (Absolute Value)\n\n")
+        f.write("| Rank | Model | Strategy | Exit Timing | False Exits | Total Return (%) |\n")
+        f.write("|------|-------|----------|-------------|-------------|------------------|\n")
+        for rank, (_, row) in enumerate(competitive_results.sort_values('Exit Timing (bars)', key=abs).iterrows(), 1):
+            f.write(f"| {rank} | {row['Model']} | {row['Strategy']} | {row['Exit Timing (bars)']:.1f} | ")
+            f.write(f"{row['False Exits']:.0f} | {row['Total Return (%)']:.2f} |\n")
+        f.write("\n")
+        
+        f.write(f"### Sorted by Coverage\n\n")
+        f.write("| Rank | Model | Strategy | Coverage (%) | Entry Timing | Exit Timing | Total Return (%) |\n")
+        f.write("|------|-------|----------|--------------|--------------|-------------|------------------|\n")
+        for rank, (_, row) in enumerate(competitive_results.sort_values('Coverage (%)', ascending=False).iterrows(), 1):
+            f.write(f"| {rank} | {row['Model']} | {row['Strategy']} | {row['Coverage (%)']:.1f} | ")
+            f.write(f"{row['Entry Timing (bars)']:.1f} | {row['Exit Timing (bars)']:.1f} | {row['Total Return (%)']:.2f} |\n")
+        f.write("\n")
+        
+        f.write(f"### Sorted by Total False Signals\n\n")
+        competitive_with_false = competitive_results.copy()
+        competitive_with_false['Total False'] = competitive_with_false['False Entries'] + competitive_with_false['False Exits']
+        f.write("| Rank | Model | Strategy | False Entries | False Exits | Total False | Sharpe Ratio |\n")
+        f.write("|------|-------|----------|---------------|-------------|-------------|--------------|\n")
+        for rank, (_, row) in enumerate(competitive_with_false.sort_values('Total False').iterrows(), 1):
+            f.write(f"| {rank} | {row['Model']} | {row['Strategy']} | {row['False Entries']:.0f} | ")
+            f.write(f"{row['False Exits']:.0f} | {row['Total False']:.0f} | {row['Sharpe Ratio']:.2f} |\n")
+        f.write("\n")
+        
+        f.write(f"---\n\n")
+        
+        # Strategy-by-strategy breakdown
+        f.write(f"## Detailed Strategy Breakdown\n\n")
+        
+        for strategy_name in competitive_results['Strategy'].unique():
+            strategy_data = competitive_results[competitive_results['Strategy'] == strategy_name]
+            f.write(f"### {strategy_name}\n\n")
+            f.write(f"Tested across {len(strategy_data)} alpha model(s)\n\n")
+            
+            # Calculate averages
+            avg_entry = strategy_data['Entry Timing (bars)'].mean()
+            avg_exit = strategy_data['Exit Timing (bars)'].mean()
+            avg_coverage = strategy_data['Coverage (%)'].mean()
+            avg_false_entries = strategy_data['False Entries'].mean()
+            avg_false_exits = strategy_data['False Exits'].mean()
+            
+            f.write(f"**Average Metrics:**\n")
+            f.write(f"- Entry Timing: {avg_entry:.1f} bars\n")
+            f.write(f"- Exit Timing: {avg_exit:.1f} bars\n")
+            f.write(f"- Coverage: {avg_coverage:.1f}%\n")
+            f.write(f"- False Entries: {avg_false_entries:.1f}\n")
+            f.write(f"- False Exits: {avg_false_exits:.1f}\n\n")
+            
+            f.write("| Model | Entry Timing | Exit Timing | Coverage (%) | False Entries | False Exits | Total Return (%) |\n")
+            f.write("|-------|--------------|-------------|--------------|---------------|-------------|------------------|\n")
+            for _, row in strategy_data.iterrows():
+                f.write(f"| {row['Model']} | {row['Entry Timing (bars)']:.1f} | {row['Exit Timing (bars)']:.1f} | ")
+                f.write(f"{row['Coverage (%)']:.1f} | {row['False Entries']:.0f} | {row['False Exits']:.0f} | ")
+                f.write(f"{row['Total Return (%)']:.2f} |\n")
+            f.write("\n")
+        
+        f.write(f"---\n\n")
+        f.write(f"## Interpretation Guidelines\n\n")
+        f.write(f"### Entry/Exit Timing\n")
+        f.write(f"- **Negative values**: Early entries/exits (can be good or risky)\n")
+        f.write(f"- **Positive values**: Late entries/exits (missed opportunities)\n")
+        f.write(f"- **Target**: -2 to +2 bars (close to optimal)\n\n")
+        
+        f.write(f"### Coverage\n")
+        f.write(f"- **>90%**: Excellent opportunity capture\n")
+        f.write(f"- **80-90%**: Good participation\n")
+        f.write(f"- **60-80%**: Moderate participation\n")
+        f.write(f"- **<60%**: Significant opportunities missed\n\n")
+        
+        f.write(f"### False Signals\n")
+        f.write(f"- **0**: Perfect discipline\n")
+        f.write(f"- **1-3**: Excellent signal quality\n")
+        f.write(f"- **4-10**: Acceptable noise level\n")
+        f.write(f"- **>10**: Poor signal quality or overtrading\n")
+    
+    print(f"✓ Complete timing analysis saved to {timing_md_file}")
     
     # Generate and save plots if requested
     if save_plots:

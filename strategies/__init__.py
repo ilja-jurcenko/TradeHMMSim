@@ -9,6 +9,7 @@ from .oracle import OracleStrategy
 from .alpha_hmm_filter import AlphaHMMFilterStrategy
 from .alpha_hmm_combine import AlphaHMMCombineStrategy
 from .regime_adaptive import RegimeAdaptiveAlphaStrategy
+from .alpha_oracle import AlphaOracleStrategy
 
 __all__ = [
     'BaseStrategy',
@@ -17,5 +18,6 @@ __all__ = [
     'OracleStrategy',
     'AlphaHMMFilterStrategy',
     'AlphaHMMCombineStrategy',
-    'RegimeAdaptiveAlphaStrategy'
+    'RegimeAdaptiveAlphaStrategy',
+    'AlphaOracleStrategy'
 ]
