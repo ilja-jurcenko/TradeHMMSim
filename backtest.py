@@ -303,12 +303,13 @@ class BacktestEngine:
             positions, state_data = strategy.generate_positions(
                 alpha_signals_aligned, self.close, common_idx, **kwargs
             )
+            
+            # Store momentum-based state info
             state_info = {
-                'state_labels': state_data['state_labels'],
-                'state_1': state_data['state_1'],
-                'state_2': state_data['state_2'],
-                'state_3': state_data['state_3'],
-                'state_4': state_data['state_4']
+                'bull_prob_momentum': state_data['bull_prob_momentum'],
+                'bear_prob_momentum': state_data['bear_prob_momentum'],
+                'buy_signal': state_data['buy_signal'],
+                'exit_signal': state_data['exit_signal']
             }
             kwargs['state_info'] = state_data
             
