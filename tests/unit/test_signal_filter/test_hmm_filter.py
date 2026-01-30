@@ -40,13 +40,17 @@ class TestHMMFilter(unittest.TestCase):
         
     def test_feature_creation(self):
         """Test feature creation from prices."""
-        hmm = HMMRegimeFilter(n_states=3)
-        features = hmm.make_features(self.prices, vol_window=20)
+        hmm = HMMRegimeFilter(n_states=3, short_vol_window=20, long_vol_window=40,
+                             short_ma_window=10, long_ma_window=30)
+        features = hmm.make_features(self.prices)
         
-        # Check feature shape
-        self.assertEqual(features.shape[1], 2)
+        # Check feature shape - should have 5 features now
+        self.assertEqual(features.shape[1], 5)
         self.assertIn('ret', features.columns)
-        self.assertIn('rv', features.columns)
+        self.assertIn('rv_short', features.columns)
+        self.assertIn('rv_long', features.columns)
+        self.assertIn('sma_short', features.columns)
+        self.assertIn('sma_long', features.columns)
         
         # Check that features are created
         self.assertGreater(len(features), 0)

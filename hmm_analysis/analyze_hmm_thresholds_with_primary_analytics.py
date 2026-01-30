@@ -2,6 +2,11 @@
 Analyze HMM probability distributions and threshold effectiveness.
 """
 
+import sys
+from pathlib import Path
+# Add parent directory to path to import project modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import numpy as np
 import pandas as pd
 from portfolio import Portfolio
@@ -142,8 +147,39 @@ import os
 # Create output directory
 os.makedirs('hmm_analysis', exist_ok=True)
 
+# Calculate returns and equity curve
+returns = close.pct_change().fillna(0)
+equity = (1 + returns).cumprod()
+equity_plot = equity.loc[plot_idx]
+returns_plot = returns.loc[plot_idx]
+
+# Calculate regime-specific return statistics
+regime_stats = {}
+for regime_name, regime_id in [('Bear', bear_regime), ('Bull', bull_regime), ('Neutral', neutral_regime)]:
+    if regime_id is not None:
+        regime_mask = (regime.loc[plot_idx] == regime_id)
+        regime_returns = returns_plot[regime_mask]
+        regime_stats[regime_name] = {
+            'mean': regime_returns.mean() * 252,  # Annualized
+            'std': regime_returns.std() * np.sqrt(252),  # Annualized
+            'count': regime_returns.count(),
+            'positive_days': (regime_returns > 0).sum(),
+            'negative_days': (regime_returns < 0).sum()
+        }
+
+print(f"\n{'='*80}")
+print("REGIME-SPECIFIC RETURN STATISTICS")
+print(f"{'='*80}")
+for regime_name, stats in regime_stats.items():
+    print(f"\n{regime_name} Regime:")
+    print(f"  Days: {stats['count']}")
+    print(f"  Annualized Mean Return: {stats['mean']*100:.2f}%")
+    print(f"  Annualized Volatility: {stats['std']*100:.2f}%")
+    print(f"  Positive Days: {stats['positive_days']} ({stats['positive_days']/stats['count']*100:.1f}%)")
+    print(f"  Negative Days: {stats['negative_days']} ({stats['negative_days']/stats['count']*100:.1f}%)")
+
 # Create figure with subplots
-fig, axes = plt.subplots(5, 1, figsize=(16, 14), sharex=True)
+fig, axes = plt.subplots(7, 1, figsize=(16, 20), sharex=True)
 fig.suptitle('HMM Regime Analysis with Trading Signals', fontsize=16, fontweight='bold')
 
 # Align data
@@ -418,6 +454,90 @@ if total_entries > 0:
             fontsize=8, verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6),
             family='monospace')
+
+# Plot 6: Equity curve colored by regime (when above threshold)
+ax6 = axes[5]
+ax6.set_ylabel('Equity ($)', fontsize=10, fontweight='bold')
+ax6.set_title('Equity Curve Colored by Regime (Bull+Neutral > 0.65)', fontsize=11, fontweight='bold')
+
+# Plot equity curve segments colored by regime when above threshold
+threshold_met = (bull_prob_combined > 0.65).values
+for i in range(len(plot_idx) - 1):
+    current_regime = regime_plot.iloc[i]
+    
+    if threshold_met[i]:
+        # Color based on regime when threshold is met
+        if current_regime == bear_regime:
+            color = 'red'
+            alpha = 0.8
+        elif current_regime == bull_regime:
+            color = 'green'
+            alpha = 0.8
+        elif current_regime == neutral_regime:
+            color = 'gray'
+            alpha = 0.8
+        else:
+            color = 'black'
+            alpha = 0.8
+    else:
+        # Below threshold - light gray
+        color = 'lightgray'
+        alpha = 0.4
+    
+    ax6.plot([plot_idx[i], plot_idx[i+1]], 
+            [equity_plot.iloc[i], equity_plot.iloc[i+1]], 
+            color=color, linewidth=2, alpha=alpha)
+
+# Create legend
+legend_elements6 = [
+    Line2D([0], [0], color='green', lw=2, label='Bull Regime (>0.65)'),
+    Line2D([0], [0], color='gray', lw=2, label='Neutral Regime (>0.65)'),
+    Line2D([0], [0], color='red', lw=2, label='Bear Regime (>0.65)'),
+    Line2D([0], [0], color='lightgray', lw=2, alpha=0.4, label='Below Threshold')
+]
+ax6.legend(handles=legend_elements6, loc='upper left', fontsize=9)
+ax6.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+
+# Plot 7: Regime return statistics (bar charts)
+ax7 = axes[6]
+ax7.set_ylabel('Value', fontsize=10, fontweight='bold')
+ax7.set_title('Regime Return Statistics (Annualized)', fontsize=11, fontweight='bold')
+
+# Prepare data for bar chart
+regime_names = []
+mean_returns = []
+volatilities = []
+for regime_name in ['Bear', 'Bull', 'Neutral']:
+    if regime_name in regime_stats:
+        regime_names.append(regime_name)
+        mean_returns.append(regime_stats[regime_name]['mean'] * 100)
+        volatilities.append(regime_stats[regime_name]['std'] * 100)
+
+x_pos = np.arange(len(regime_names))
+width = 0.35
+
+# Create bars
+bars1 = ax7.bar(x_pos - width/2, mean_returns, width, label='Mean Return (%)', 
+                color=['red' if 'Bear' in n else 'green' if 'Bull' in n else 'gray' for n in regime_names],
+                alpha=0.7, edgecolor='black')
+bars2 = ax7.bar(x_pos + width/2, volatilities, width, label='Volatility (%)',
+                color=['darkred' if 'Bear' in n else 'darkgreen' if 'Bull' in n else 'darkgray' for n in regime_names],
+                alpha=0.5, edgecolor='black')
+
+# Add value labels on bars
+for bars in [bars1, bars2]:
+    for bar in bars:
+        height = bar.get_height()
+        ax7.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%',
+                ha='center', va='bottom', fontsize=8)
+
+ax7.set_xticks(x_pos)
+ax7.set_xticklabels(regime_names)
+ax7.legend(loc='upper right', fontsize=9)
+ax7.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, axis='y')
+ax7.axhline(y=0, color='black', linewidth=0.8)
+ax7.set_xlabel('Regime', fontsize=10, fontweight='bold')
 
 # Format x-axis
 for ax in axes:

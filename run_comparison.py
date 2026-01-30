@@ -258,17 +258,113 @@ def run_comparison(ticker = None,
         refit_every = config.get('hmm', {}).get('refit_every', refit_every)
         short_vol_window = config.get('hmm', {}).get('short_vol_window', 10)
         long_vol_window = config.get('hmm', {}).get('long_vol_window', 30)
+        short_ma_window = config.get('hmm', {}).get('short_ma_window', 10)
+        long_ma_window = config.get('hmm', {}).get('long_ma_window', 30)
+        covariance_type = config.get('hmm', {}).get('covariance_type', 'diag')
+        n_iter = config.get('hmm', {}).get('n_iter', 100)
+        tol = config.get('hmm', {}).get('tol', 1e-3)
         bear_prob_threshold = config.get('hmm', {}).get('bear_prob_threshold', bear_prob_threshold)
         bull_prob_threshold = config.get('hmm', {}).get('bull_prob_threshold', bull_prob_threshold)
     else:
         config = None
-        # Set defaults for volatility windows when no config provided
+        # Set defaults for volatility and MA windows when no config provided
         short_vol_window = 10
         long_vol_window = 30
+        short_ma_window = 10
+        long_ma_window = 30
+        covariance_type = 'diag'
+        n_iter = 100
+        tol = 1e-3
     
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
     print("="*80)
+    
+    # Store original user-specified dates
+    user_start_date = start_date
+    user_end_date = end_date
+    
+    # For HMM walk-forward testing, we need to load extra historical data
+    # to ensure the first prediction can be made at user_start_date.
+    # We need to account for:
+    # 1. train_window: trading days needed for initial HMM training
+    # 2. Feature windows: days needed for feature calculation (moving averages, volatility)
+    # Since train_window is in trading days, we need to:
+    # 1. Load data to find trading days
+    # 2. Count back (train_window + max_feature_window) trading days from user_start_date
+    # 3. Use that as data_load_start_date
+    
+    # Determine max feature window from config
+    # Features use max(long_ma_window, long_vol_window) for longest lookback
+    max_feature_window = max(long_ma_window, long_vol_window)
+    total_lookback_days = train_window + max_feature_window
+    
+    print(f"\nCalculating data requirements:")
+    print(f"  HMM train_window: {train_window} trading days")
+    print(f"  Max feature window: {max_feature_window} trading days")
+    print(f"  Total lookback needed: {total_lookback_days} trading days")
+    
+    # First, do a quick load to determine the correct data_load_start_date
+    # We'll load a generous amount of historical data to find the right start
+    from datetime import timedelta
+    start_date_dt = pd.to_datetime(start_date)
+    
+    # Load extra calendar days (rough estimate: trading days × 1.5 for weekends/holidays)
+    # Add extra buffer to be safe
+    buffer_calendar_days = int(total_lookback_days * 1.6)
+    temp_start = start_date_dt - timedelta(days=buffer_calendar_days)
+    
+    print(f"\nLoading data to calculate proper training window...")
+    print(f"  Temporary load from: {temp_start.strftime('%Y-%m-%d')}")
+    
+    # Load data with buffer to find exact trading days
+    from portfolio import Portfolio
+    temp_portfolio = Portfolio(ticker, temp_start.strftime('%Y-%m-%d'), user_end_date)
+    temp_portfolio.load_data()
+    
+    # Get close prices for the first ticker
+    if isinstance(ticker, list):
+        temp_close = temp_portfolio.get_close_prices(ticker[0])
+    else:
+        temp_close = temp_portfolio.get_close_prices(ticker)
+    
+    # Find the position of user_start_date in the data
+    try:
+        user_start_dt = pd.to_datetime(user_start_date)
+        # Find the closest trading day on or after user_start_date
+        valid_dates = temp_close.index[temp_close.index >= user_start_dt]
+        if len(valid_dates) == 0:
+            raise ValueError(f"No trading days found on or after {user_start_date}")
+        actual_start_date = valid_dates[0]
+        idx_start = temp_close.index.get_loc(actual_start_date)
+        
+        # Check if we have enough history (need train_window + max_feature_window)
+        if idx_start < total_lookback_days:
+            raise ValueError(
+                f"Insufficient data: Need {total_lookback_days} trading days "
+                f"({train_window} for HMM + {max_feature_window} for features) "
+                f"before {user_start_date}, but only have {idx_start} trading days available. "
+                f"Try using an earlier start date or loading more historical data."
+            )
+        
+        # Calculate the date that is total_lookback_days trading days before user_start_date
+        data_load_start_idx = idx_start - total_lookback_days
+        data_load_start_date = temp_close.index[data_load_start_idx].strftime('%Y-%m-%d')
+        extra_trading_days = idx_start - data_load_start_idx
+        
+        print(f"  Found {idx_start} trading days before {actual_start_date}")
+        print(f"  Calculated data load start: {data_load_start_date} ({extra_trading_days} trading days before test start)")
+        
+    except Exception as e:
+        print(f"  Warning: Could not calculate exact trading days: {e}")
+        print(f"  Falling back to calendar day calculation")
+        data_load_start_date = (start_date_dt - timedelta(days=total_lookback_days)).strftime('%Y-%m-%d')
+        extra_trading_days = total_lookback_days
+    
+    print(f"\nDate range adjustment for HMM training:")
+    print(f"  User-specified test period: {user_start_date} to {user_end_date}")
+    print(f"  Data loading period: {data_load_start_date} to {user_end_date}")
+    print(f"  Extra trading days for HMM training: {extra_trading_days}")
     
     # Create output directory with timestamp in results folder
     if output_dir is None:
@@ -295,8 +391,11 @@ def run_comparison(ticker = None,
         'run_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'data': {
             'ticker': ticker,
-            'start_date': start_date,
-            'end_date': end_date
+            'test_start_date': user_start_date,
+            'test_end_date': user_end_date,
+            'data_load_start_date': data_load_start_date,
+            'data_load_end_date': user_end_date,
+            'extra_training_days': extra_trading_days
         },
         'backtest': {
             'initial_capital': 100000.0,
@@ -368,23 +467,44 @@ def run_comparison(ticker = None,
     is_multi_asset = len(ticker) > 1
     ticker_str = ', '.join(ticker) if is_multi_asset else ticker[0]
     
-    # Load data
+    # Load data with adjusted start date for HMM training
     print(f"\nLoading data for {ticker_str}...")
     if is_multi_asset:
         print(f"Using multi-asset portfolio with regime-based rebalancing: {use_regime_rebalancing}")
-    portfolio = Portfolio(ticker, start_date, end_date)
+    portfolio = Portfolio(ticker, data_load_start_date, user_end_date)
     portfolio.load_data()
     portfolio.summary()
     
     # Get close prices - use primary ticker (first in list) for alpha signal generation
     primary_ticker = ticker[0]
-    close = portfolio.get_close_prices(primary_ticker)
+    close_full = portfolio.get_close_prices(primary_ticker)
+    
+    # Trim close prices to user-specified date range for final results
+    # But keep full data for HMM training
+    close_test_period = close_full[close_full.index >= user_start_date]
+    print(f"\nData split:")
+    print(f"  Full dataset for HMM training: {len(close_full)} days ({close_full.index[0]} to {close_full.index[-1]})")
+    print(f"  Test period for backtest: {len(close_test_period)} days ({close_test_period.index[0]} to {close_test_period.index[-1]})")
+    
+    # Use full data for HMM training but will trim results later
+    # Note: The HMM walkforward_filter will start predictions from train_window onwards,
+    # which means predictions will start exactly at user_start_date since we loaded
+    # train_window days of data before that date. This ensures:
+    # 1. HMM has enough historical data for initial training
+    # 2. Test period starts exactly on user-specified start_date
+    # 3. No data leakage (only past data used for training at each point)
+    close = close_full
     
     # Initialize HMM filter
     print("\nInitializing HMM regime filter...")
     hmm_filter = HMMRegimeFilter(n_states=3, random_state=42, 
+                                 covariance_type=covariance_type,
+                                 n_iter=n_iter,
+                                 tol=tol,
                                  short_vol_window=short_vol_window,
-                                 long_vol_window=long_vol_window)
+                                 long_vol_window=long_vol_window,
+                                 short_ma_window=short_ma_window,
+                                 long_ma_window=long_ma_window)
     
     # Storage for results
     results_list = []
@@ -487,9 +607,15 @@ def run_comparison(ticker = None,
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
             hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             covariance_type=covariance_type,
+                                             n_iter=n_iter,
+                                             tol=tol,
                                              short_vol_window=short_vol_window,
-                                             long_vol_window=long_vol_window)
-            engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+                                             long_vol_window=long_vol_window,
+                                             short_ma_window=short_ma_window,
+                                             long_ma_window=long_ma_window)
+            engine_hmm = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
+                                        test_start_date=user_start_date)
             results_hmm = engine_hmm.run(
                 strategy_mode='hmm_only',
                 walk_forward=True,
@@ -552,8 +678,14 @@ def run_comparison(ticker = None,
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
             hmm_filter_oracle = HMMRegimeFilter(n_states=3, random_state=42,
                                                 short_vol_window=short_vol_window,
-                                                long_vol_window=long_vol_window)
-            engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle)
+                                                long_vol_window=long_vol_window,
+                                                short_ma_window=short_ma_window,
+                                                long_ma_window=long_ma_window,
+                                                covariance_type=covariance_type,
+                                                n_iter=n_iter,
+                                                tol=tol)
+            engine_oracle = BacktestEngine(close, model, hmm_filter=hmm_filter_oracle,
+                                           test_start_date=user_start_date)
             results_oracle = engine_oracle.run(
                 strategy_mode='oracle',
                 bear_prob_threshold=bear_prob_threshold,
@@ -611,9 +743,15 @@ def run_comparison(ticker = None,
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
             hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             covariance_type=covariance_type,
+                                             n_iter=n_iter,
+                                             tol=tol,
                                              short_vol_window=short_vol_window,
-                                             long_vol_window=long_vol_window)
-            engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+                                             long_vol_window=long_vol_window,
+                                             short_ma_window=short_ma_window,
+                                             long_ma_window=long_ma_window)
+            engine_filter = BacktestEngine(close, model, hmm_filter=hmm_filter_new,
+                                           test_start_date=user_start_date)
             results_filter = engine_filter.run(
                 strategy_mode='alpha_hmm_filter',
                 walk_forward=True,
@@ -664,9 +802,15 @@ def run_comparison(ticker = None,
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
             hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             covariance_type=covariance_type,
+                                             n_iter=n_iter,
+                                             tol=tol,
                                              short_vol_window=short_vol_window,
-                                             long_vol_window=long_vol_window)
-            engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new)
+                                             long_vol_window=long_vol_window,
+                                             short_ma_window=short_ma_window,
+                                             long_ma_window=long_ma_window)
+            engine_combine = BacktestEngine(close, model, hmm_filter=hmm_filter_new,
+                                            test_start_date=user_start_date)
             results_combine = engine_combine.run(
                 strategy_mode='alpha_hmm_combine',
                 walk_forward=True,
@@ -725,10 +869,16 @@ def run_comparison(ticker = None,
             bb_model = BollingerBands(short_window=20, long_window=2)
             
             hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+                                             covariance_type=covariance_type,
+                                             n_iter=n_iter,
+                                             tol=tol,
                                              short_vol_window=short_vol_window,
-                                             long_vol_window=long_vol_window)
+                                             long_vol_window=long_vol_window,
+                                             short_ma_window=short_ma_window,
+                                             long_ma_window=long_ma_window)
             engine_adaptive = BacktestEngine(close, model, hmm_filter=hmm_filter_new, 
-                                            bear_alpha_model=bb_model)
+                                            bear_alpha_model=bb_model,
+                                            test_start_date=user_start_date)
             results_adaptive = engine_adaptive.run(
                 strategy_mode='regime_adaptive_alpha',
                 walk_forward=True,
@@ -819,20 +969,23 @@ def run_comparison(ticker = None,
     # Create results DataFrame
     results_df = pd.DataFrame(results_list)
     
-    # Calculate benchmark (Buy & Hold)
+    # Calculate benchmark (Buy & Hold) on test period only
     print("\n" + "="*80)
     print("CALCULATING BUY & HOLD BENCHMARK")
     print("="*80)
     if is_multi_asset:
-        # For multi-asset, use equal-weighted portfolio returns
+        # For multi-asset, use equal-weighted portfolio returns on test period
         print(f"Using equal-weighted portfolio: {ticker_str}")
-        returns = portfolio.get_weighted_returns()
+        returns_full = portfolio.get_weighted_returns()
+        # Trim to test period
+        returns = returns_full[returns_full.index >= user_start_date]
     else:
-        returns = close.pct_change().fillna(0)
+        # Use test period close prices for benchmark
+        returns = close_test_period.pct_change().fillna(0)
     benchmark_metrics = Statistics.calculate_all_metrics(returns)
     
     print("\nBuy & Hold Performance:")
-    print(f"  Total Return: {benchmark_metrics['total_return']*100:.2f}%")
+    print(f"  Annual Return: {benchmark_metrics['annualized_return']*100:.2f}%")
     print(f"  Sharpe Ratio: {benchmark_metrics['sharpe_ratio']:.2f}")
     print(f"  Max Drawdown: {benchmark_metrics['max_drawdown']*100:.2f}%")
     
@@ -930,7 +1083,7 @@ def run_comparison(ticker = None,
     
     # Save results to output directory
     ticker_filename = '_'.join(ticker) if is_multi_asset else ticker[0]
-    output_file = os.path.join(output_dir, f'comparison_{ticker_filename}_{start_date}_{end_date}.csv')
+    output_file = os.path.join(output_dir, f'comparison_{ticker_filename}_{user_start_date}_{user_end_date}.csv')
     results_df.to_csv(output_file, index=False)
     print(f"\n✓ Results saved to {output_file}")
     
@@ -944,7 +1097,8 @@ def run_comparison(ticker = None,
             f.write(f"**Regime Rebalancing:** {use_regime_rebalancing}\n\n")
         else:
             f.write(f"**Ticker:** {ticker[0]}\n\n")
-        f.write(f"**Period:** {start_date} to {end_date}\n\n")
+        f.write(f"**Test Period:** {user_start_date} to {user_end_date}\n\n")
+        f.write(f"**Data Loaded:** {data_load_start_date} to {user_end_date} ({train_window} extra days for HMM training)\n\n")
         f.write(f"---\n\n")
         
         # Configuration section
@@ -956,8 +1110,9 @@ def run_comparison(ticker = None,
             f.write(f"- **Portfolio:** {ticker_str}\n")
         else:
             f.write(f"- **Ticker:** {ticker[0]}\n")
-        f.write(f"- **Start Date:** {start_date}\n")
-        f.write(f"- **End Date:** {end_date}\n\n")
+        f.write(f"- **Test Start Date:** {user_start_date}\n")
+        f.write(f"- **Test End Date:** {user_end_date}\n")
+        f.write(f"- **Data Load Start:** {data_load_start_date} (includes {train_window} days for HMM training)\n\n")
         
         f.write(f"### Alpha Model Parameters\n")
         f.write(f"- **Short Window:** {short_window}\n")
@@ -986,7 +1141,7 @@ def run_comparison(ticker = None,
         
         # Benchmark performance
         f.write(f"## Benchmark Performance (Buy & Hold)\n\n")
-        f.write(f"- **Total Return:** {benchmark_metrics['total_return']*100:.2f}%\n")
+        f.write(f"- **Annual Return:** {benchmark_metrics['annualized_return']*100:.2f}%\n")
         f.write(f"- **Sharpe Ratio:** {benchmark_metrics['sharpe_ratio']:.2f}\n")
         f.write(f"- **Max Drawdown:** {benchmark_metrics['max_drawdown']*100:.2f}%\n\n")
         f.write(f"---\n\n")
@@ -1120,7 +1275,7 @@ def run_comparison(ticker = None,
         # Files generated
         f.write(f"---\n\n")
         f.write(f"## Generated Files\n\n")
-        f.write(f"- **CSV Results:** `comparison_{ticker_filename}_{start_date}_{end_date}.csv`\n")
+        f.write(f"- **CSV Results:** `comparison_{ticker_filename}_{user_start_date}_{user_end_date}.csv`\n")
         if save_plots:
             f.write(f"- **Summary Plots:** `comparison_plots_{ticker_filename}.png`\n")
             num_plots = len(alpha_models) * 5
@@ -1134,7 +1289,7 @@ def run_comparison(ticker = None,
     with open(timing_md_file, 'w') as f:
         f.write(f"# Complete Timing Quality Analysis\n\n")
         f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        f.write(f"**Period:** {start_date} to {end_date}\n\n")
+        f.write(f"**Test Period:** {user_start_date} to {user_end_date}\n\n")
         f.write(f"---\n\n")
         
         f.write(f"## Overview\n\n")

@@ -149,7 +149,7 @@ class BacktestPlotter:
         
         Colors the equity price line based on which regime probability exceeds the threshold:
         - Green: Bull regime (bull_prob > threshold)
-        - Orange: Neutral regime (neither bull nor bear exceed threshold)
+        - Orange: Sideways regime (neither bull nor bear exceed threshold)
         - Red: Bear regime (bear_prob > threshold)
         
         Parameters:
@@ -199,14 +199,19 @@ class BacktestPlotter:
             bull_combined_prob = bull_prob
         
         # Determine active regime for each time point
-        active_regime = pd.Series('Neutral', index=common_idx)
+        active_regime = pd.Series('Sideways', index=common_idx)
         active_regime[bear_prob >= bear_threshold] = 'Bear'
         active_regime[bull_combined_prob > bull_threshold] = 'Bull'
+        
+        # Detect regime switches (turning points)
+        regime_switches = active_regime != active_regime.shift(1)
+        regime_switches.iloc[0] = False  # First point is not a switch
+        switch_points = regime_switches[regime_switches].index
         
         # Regime colors
         regime_colors = {
             'Bull': '#2ecc71',    # Green
-            'Neutral': '#f39c12',  # Orange
+            'Sideways': '#f39c12',  # Orange
             'Bear': '#e74c3c'      # Red
         }
         
@@ -223,15 +228,50 @@ class BacktestPlotter:
                     [close_aligned.iloc[i], close_aligned.iloc[i + 1]], 
                     color=color, linewidth=1.5, alpha=0.8)
         
+        # Mark regime switches with very small dots
+        for switch_idx in switch_points:
+            switch_regime = active_regime.loc[switch_idx]
+            switch_price = close_aligned.loc[switch_idx]
+            
+            # Small dot marker for the switch point
+            if switch_regime == 'Bull':
+                ax1.scatter([switch_idx], [switch_price], color='green', marker='o', 
+                           s=15, zorder=5, edgecolors='darkgreen', linewidths=0.5,
+                           label='Switch to Bull' if switch_idx == switch_points[0] else '')
+            elif switch_regime == 'Bear':
+                ax1.scatter([switch_idx], [switch_price], color='red', marker='o', 
+                           s=15, zorder=5, edgecolors='darkred', linewidths=0.5,
+                           label='Switch to Bear' if switch_idx == switch_points[0] else '')
+            elif switch_regime == 'Sideways':
+                ax1.scatter([switch_idx], [switch_price], color='orange', marker='o', 
+                           s=15, zorder=5, edgecolors='darkorange', linewidths=0.5,
+                           label='Switch to Sideways' if switch_idx == switch_points[0] else '')
+        
+        
         ax1.set_ylabel('Price ($)', fontsize=10)
-        ax1.set_title(f'Equity Price Colored by Active Regime ({results.get("strategy_mode", "HMM").upper()})', 
+        ax1.set_title(f'Equity Price Colored by Active Regime with Switches ({results.get("strategy_mode", "HMM").upper()})', 
                      fontsize=12, fontweight='bold')
         ax1.grid(True, alpha=0.3)
-        ax1.legend([plt.Line2D([0], [0], color=regime_colors['Bull'], linewidth=2),
-                   plt.Line2D([0], [0], color=regime_colors['Neutral'], linewidth=2),
-                   plt.Line2D([0], [0], color=regime_colors['Bear'], linewidth=2)],
-                  ['Bull Regime (Active)', 'Neutral Regime', 'Bear Regime (Active)'],
-                  loc='upper left', fontsize=9)
+        
+        # Create legend handles
+        legend_handles = [
+            plt.Line2D([0], [0], color=regime_colors['Bull'], linewidth=2, label='Bull Regime'),
+            plt.Line2D([0], [0], color=regime_colors['Sideways'], linewidth=2, label='Sideways Regime'),
+            plt.Line2D([0], [0], color=regime_colors['Bear'], linewidth=2, label='Bear Regime')
+        ]
+        
+        # Add switch markers to legend if any switches occurred
+        if len(switch_points) > 0:
+            legend_handles.extend([
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='green', 
+                          markeredgecolor='darkgreen', markersize=5, label='→ Bull Switch'),
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', 
+                          markeredgecolor='darkorange', markersize=5, label='→ Sideways Switch'),
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
+                          markeredgecolor='darkred', markersize=5, label='→ Bear Switch')
+            ])
+        
+        ax1.legend(handles=legend_handles, loc='upper left', fontsize=8, ncol=2)
         
         # Plot 2: Regime probabilities with thresholds
         ax2 = axes[1]
@@ -318,8 +358,8 @@ class BacktestPlotter:
             
             if regime_val == 2:  # Bull
                 color = regime_colors['Bull']
-            elif regime_val == 1:  # Neutral
-                color = regime_colors['Neutral']
+            elif regime_val == 1:  # Sideways
+                color = regime_colors['Sideways']
             else:  # Bear
                 color = regime_colors['Bear']
             

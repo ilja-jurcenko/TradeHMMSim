@@ -43,7 +43,8 @@ class BacktestEngine:
                  alpha_config: Optional[Dict[str, Any]] = None,
                  hmm_filter: Optional[HMMRegimeFilter] = None,
                  bear_alpha_model: Optional[AlphaModel] = None,
-                 initial_capital: float = 100000.0):
+                 initial_capital: float = 100000.0,
+                 test_start_date: Optional[str] = None):
         """
         Initialize backtest engine.
         
@@ -65,6 +66,10 @@ class BacktestEngine:
             Used with 'regime_adaptive_alpha' strategy mode.
         initial_capital : float
             Initial capital
+        test_start_date : str, optional
+            User-specified test start date (format: 'YYYY-MM-DD').
+            When provided, HMM results will be trimmed to start from this date.
+            This is useful when extra historical data is loaded for HMM training.
             
         Raises:
         -------
@@ -75,6 +80,7 @@ class BacktestEngine:
         self.hmm_filter = hmm_filter
         self.bear_alpha_model = bear_alpha_model
         self.initial_capital = initial_capital
+        self.test_start_date = test_start_date
         
         # Handle alpha model initialization
         if alpha_model is not None and alpha_config is not None:
@@ -399,6 +405,19 @@ class BacktestEngine:
                 train_window=train_window,
                 refit_every=refit_every
             )
+        
+        # Trim HMM results to user-specified test start date if provided
+        # This is needed when extra historical data is loaded for HMM training
+        if self.test_start_date is not None:
+            test_start = pd.to_datetime(self.test_start_date)
+            print(f"  Trimming HMM results to start from {self.test_start_date}")
+            
+            # Filter all HMM outputs to start from test_start_date
+            probs = probs[probs.index >= test_start]
+            regime = regime[regime.index >= test_start]
+            switches = switches[switches.index >= test_start]
+            
+            print(f"  HMM predictions now span: {probs.index[0]} to {probs.index[-1]}")
         
         regime_info = self.hmm_filter.identify_regimes(self.close, regime)
         return probs, regime, switches, regime_info

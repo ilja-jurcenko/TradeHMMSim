@@ -82,7 +82,7 @@ class AlphaHMMCombineStrategy(BaseStrategy):
         
         # Exit conditions
         alpha_bearish = (alpha_signals < 0)
-        bear_momentum_spike = (bear_prob_momentum > 0.5)  # Lowered from 0.15 to 0.01 for more responsive exits
+        bear_momentum_spike = (bear_prob_momentum > 0.1)  # Lowered from 0.15 to 0.01 for more responsive exits
         
         exit_signal = alpha_bearish | bear_momentum_spike
         

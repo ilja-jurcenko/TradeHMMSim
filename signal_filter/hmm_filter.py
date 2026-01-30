@@ -15,8 +15,9 @@ class HMMRegimeFilter:
     """
     
     def __init__(self, n_states: int = 3, covariance_type: str = "diag", 
-                 n_iter: int = 100, random_state: int = 42,
-                 short_vol_window: int = 10, long_vol_window: int = 30):
+                 n_iter: int = 100, tol: float = 1e-3, random_state: int = 42,
+                 short_vol_window: int = 10, long_vol_window: int = 30,
+                 short_ma_window: int = 10, long_ma_window: int = 30):
         """
         Initialize HMM Regime Filter.
         
@@ -28,25 +29,36 @@ class HMMRegimeFilter:
             Type of covariance matrix ('diag', 'full', 'spherical', 'tied')
         n_iter : int
             Maximum number of iterations for EM algorithm
+        tol : float
+            Convergence threshold for EM algorithm
         random_state : int
             Random seed for reproducibility
         short_vol_window : int
             Window for short-term volatility calculation
         long_vol_window : int
             Window for long-term volatility calculation
+        short_ma_window : int
+            Window for short-term moving average calculation
+        long_ma_window : int
+            Window for long-term moving average calculation
         """
         self.n_states = n_states
         self.covariance_type = covariance_type
         self.n_iter = n_iter
+        self.tol = tol
         self.random_state = random_state
         self.short_vol_window = short_vol_window
         self.long_vol_window = long_vol_window
+        self.short_ma_window = short_ma_window
+        self.long_ma_window = long_ma_window
         self.model: Optional[GaussianHMM] = None
         self.scaler = StandardScaler()
         self.is_fitted = False
         
     def make_features(self, close: pd.Series, short_vol_window: Optional[int] = None, 
-                     long_vol_window: Optional[int] = None) -> pd.DataFrame:
+                     long_vol_window: Optional[int] = None,
+                     short_ma_window: Optional[int] = None,
+                     long_ma_window: Optional[int] = None) -> pd.DataFrame:
         """
         Create features for HMM from close prices.
         
@@ -58,32 +70,46 @@ class HMMRegimeFilter:
             Window for short-term volatility calculation (uses self.short_vol_window if None)
         long_vol_window : int, optional
             Window for long-term volatility calculation (uses self.long_vol_window if None)
+        short_ma_window : int, optional
+            Window for short-term moving average calculation (uses self.short_ma_window if None)
+        long_ma_window : int, optional
+            Window for long-term moving average calculation (uses self.long_ma_window if None)
             
         Returns:
         --------
         pd.DataFrame
-            Feature matrix with returns, short-term volatility, and long-term volatility
+            Feature matrix with returns, volatilities, and moving averages
         """
         if isinstance(close, pd.DataFrame):
             close = close.iloc[:, 0]
         
         # Use instance defaults if not provided
-        short_window = short_vol_window if short_vol_window is not None else self.short_vol_window
-        long_window = long_vol_window if long_vol_window is not None else self.long_vol_window
+        short_vol_win = short_vol_window if short_vol_window is not None else self.short_vol_window
+        long_vol_win = long_vol_window if long_vol_window is not None else self.long_vol_window
+        short_ma_win = short_ma_window if short_ma_window is not None else self.short_ma_window
+        long_ma_win = long_ma_window if long_ma_window is not None else self.long_ma_window
         
         # Log returns
         r = np.log(close).diff()
         
         # Short-term realized volatility
-        rv_short = r.rolling(short_window).std()
+        rv_short = r.rolling(short_vol_win).std()
         
         # Long-term realized volatility
-        rv_long = r.rolling(long_window).std()
+        rv_long = r.rolling(long_vol_win).std()
+        
+        # Short-term simple moving average
+        sma_short = close.rolling(short_ma_win).mean()
+        
+        # Long-term simple moving average
+        sma_long = close.rolling(long_ma_win).mean()
         
         X = pd.DataFrame({
             'ret': r,
             'rv_short': rv_short,
-            'rv_long': rv_long
+            'rv_long': rv_long,
+            'sma_short': sma_short,
+            'sma_long': sma_long
         }).dropna()
         
         return X
@@ -108,6 +134,7 @@ class HMMRegimeFilter:
             n_components=self.n_states,
             covariance_type=self.covariance_type,
             n_iter=self.n_iter,
+            tol=self.tol,
             random_state=self.random_state,
             verbose=False
         )
@@ -337,6 +364,8 @@ class HMMRegimeFilter:
                           train_window: int = 504,
                           short_vol_window: Optional[int] = None,
                           long_vol_window: Optional[int] = None,
+                          short_ma_window: Optional[int] = None,
+                          long_ma_window: Optional[int] = None,
                           refit_every: int = 21) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
         """
         Walk-forward regime detection with periodic refitting.
@@ -351,6 +380,10 @@ class HMMRegimeFilter:
             Window for short-term volatility calculation (uses instance default if None)
         long_vol_window : int, optional
             Window for long-term volatility calculation (uses instance default if None)
+        short_ma_window : int, optional
+            Window for short-term moving average calculation (uses instance default if None)
+        long_ma_window : int, optional
+            Window for long-term moving average calculation (uses instance default if None)
         refit_every : int
             Refit model every N periods
             
@@ -361,7 +394,9 @@ class HMMRegimeFilter:
         """
         # Create features
         feats = self.make_features(close, short_vol_window=short_vol_window, 
-                                  long_vol_window=long_vol_window)
+                                  long_vol_window=long_vol_window,
+                                  short_ma_window=short_ma_window,
+                                  long_ma_window=long_ma_window)
         
         # Check if we have enough data
         if len(feats) < train_window:
@@ -434,6 +469,8 @@ class HMMRegimeFilter:
                                         train_window: int = 504,
                                         short_vol_window: Optional[int] = None,
                                         long_vol_window: Optional[int] = None,
+                                        short_ma_window: Optional[int] = None,
+                                        long_ma_window: Optional[int] = None,
                                         refit_every: int = 21) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
         """
         Walk-forward regime detection using predict_proba (simpler but slower).
@@ -451,6 +488,10 @@ class HMMRegimeFilter:
             Window for short-term volatility calculation (uses instance default if None)
         long_vol_window : int, optional
             Window for long-term volatility calculation (uses instance default if None)
+        short_ma_window : int, optional
+            Window for short-term moving average calculation (uses instance default if None)
+        long_ma_window : int, optional
+            Window for long-term moving average calculation (uses instance default if None)
         refit_every : int
             Refit model every N periods
             
@@ -461,7 +502,9 @@ class HMMRegimeFilter:
         """
         # Create features
         feats = self.make_features(close, short_vol_window=short_vol_window,
-                                  long_vol_window=long_vol_window)
+                                  long_vol_window=long_vol_window,
+                                  short_ma_window=short_ma_window,
+                                  long_ma_window=long_ma_window)
         
         # Check if we have enough data
         if len(feats) < train_window:
