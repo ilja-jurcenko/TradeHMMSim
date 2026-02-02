@@ -30,6 +30,35 @@ class HMMOnlyStrategy(BaseStrategy):
     def __init__(self):
         super().__init__('hmm_only')
     
+    def _calculate_regime_from_probs(self, bear_prob: pd.Series, neutral_prob: pd.Series, 
+                                    bull_prob: pd.Series, common_idx: pd.Index) -> pd.Series:
+        """
+        Calculate regime by highest probability (legacy method).
+        Preserved for compatibility and testing.
+        
+        Parameters:
+        -----------
+        bear_prob : pd.Series
+            Bear regime probability
+        neutral_prob : pd.Series
+            Neutral regime probability
+        bull_prob : pd.Series
+            Bull regime probability
+        common_idx : pd.Index
+            Common index for alignment
+            
+        Returns:
+        --------
+        pd.Series
+            Regime at each time point
+        """
+        probs_df = pd.DataFrame({
+            'bear': bear_prob,
+            'neutral': neutral_prob,
+            'bull': bull_prob
+        }, index=common_idx)
+        return probs_df.idxmax(axis=1)
+    
     def generate_positions(self,
                           alpha_signals: pd.Series,
                           close: pd.Series,
@@ -48,6 +77,7 @@ class HMMOnlyStrategy(BaseStrategy):
             Common index for alignment
         **kwargs : dict
             Must contain: bear_prob, bull_prob, neutral_prob, bear_prob_threshold, bull_prob_threshold
+            Optional: regime (from HMM), switches (from HMM)
             
         Returns:
         --------
@@ -60,16 +90,60 @@ class HMMOnlyStrategy(BaseStrategy):
         bear_threshold = kwargs.get('bear_prob_threshold', 0.65)
         bull_threshold = kwargs.get('bull_prob_threshold', 0.65)
         
-        # Step 1: Determine dominant regime by highest probability
-        probs_df = pd.DataFrame({
-            'bear': bear_prob,
-            'neutral': neutral_prob,
-            'bull': bull_prob
-        }, index=common_idx)
-        regime = probs_df.idxmax(axis=1)
+        # Get regime and switches from HMM filter if available
+        regime = kwargs.get('regime')
+        switches = kwargs.get('switches')
         
-        # Step 2: Detect regime switches
-        regime_switches = regime != regime.shift(1)
+        # Fallback: calculate regime from probabilities if not provided
+        if regime is None:
+            regime = self._calculate_regime_from_probs(bear_prob, neutral_prob, bull_prob, common_idx)
+        
+        # Map regime integer values to strings if needed
+        # Identify regime mapping from probabilities
+        bear_regime_id = None
+        bull_regime_id = None
+        neutral_regime_id = None
+        
+        if regime.dtype in [np.int32, np.int64, int]:
+            # Regime is numeric - need to map to bear/neutral/bull
+            # Use volatility-based identification from kwargs if available
+            regime_info = kwargs.get('regime_info')
+            if regime_info:
+                bear_regime_id = regime_info['bear_regime']
+                bull_regime_id = regime_info['bull_regime']
+                neutral_regime_id = regime_info['neutral_regime']
+            else:
+                # Fallback: assume 0=low vol (bull), 1=mid vol (neutral), 2=high vol (bear)
+                # This is a guess - better to pass regime_info
+                unique_regimes = sorted(regime.unique())
+                if len(unique_regimes) == 2:
+                    bull_regime_id = unique_regimes[0]
+                    bear_regime_id = unique_regimes[1]
+                    neutral_regime_id = None
+                elif len(unique_regimes) == 3:
+                    bull_regime_id = unique_regimes[0]
+                    neutral_regime_id = unique_regimes[1]
+                    bear_regime_id = unique_regimes[2]
+            
+            # Convert numeric regime to string labels
+            regime_str = regime.copy()
+            if bear_regime_id is not None:
+                regime_str = regime_str.replace(bear_regime_id, 'bear')
+            if bull_regime_id is not None:
+                regime_str = regime_str.replace(bull_regime_id, 'bull')
+            if neutral_regime_id is not None:
+                regime_str = regime_str.replace(neutral_regime_id, 'neutral')
+            regime = regime_str
+        
+        # Create switch indicator aligned with common_idx
+        #if switches is not None and len(switches) > 0:
+            # switches is a Series with dates where switches occurred
+            # Create boolean series indicating if each date has a switch
+        #    regime_switches = pd.Series(False, index=common_idx)
+        #    regime_switches.loc[regime_switches.index.intersection(switches.index)] = True
+        #else:
+            # Fallback: calculate switches from regime changes
+            regime_switches = regime != regime.shift(1)
         
         # Calculate combined bull probability for threshold checks
         bull_combined_prob = bull_prob + neutral_prob
@@ -83,7 +157,7 @@ class HMMOnlyStrategy(BaseStrategy):
                 # Initial position: always start invested
                 current_position = 1
             elif regime_switches.iloc[i]:
-                # Regime switch detected
+                # Regime switch detected at this position
                 prev_regime = regime.iloc[i-1]
                 curr_regime = regime.iloc[i]
                 
@@ -124,14 +198,37 @@ class HMMOnlyStrategy(BaseStrategy):
         bear_threshold = kwargs.get('bear_prob_threshold', 0.65)
         bull_threshold = kwargs.get('bull_prob_threshold', 0.65)
         
-        # Determine dominant regime by highest probability
-        probs_df = pd.DataFrame({
-            'bear': bear_prob,
-            'neutral': neutral_prob,
-            'bull': bull_prob
-        }, index=common_idx)
-        regime = probs_df.idxmax(axis=1)
-        regime_switches = regime != regime.shift(1)
+        # Get regime and switches from HMM filter if available
+        regime = kwargs.get('regime')
+        switches = kwargs.get('switches')
+        
+        # Fallback: calculate regime from probabilities if not provided
+        if regime is None:
+            regime = self._calculate_regime_from_probs(bear_prob, neutral_prob, bull_prob, common_idx)
+        
+        # Map numeric regime to string if needed
+        if regime.dtype in [np.int32, np.int64, int]:
+            regime_info = kwargs.get('regime_info')
+            if regime_info:
+                bear_regime_id = regime_info['bear_regime']
+                bull_regime_id = regime_info['bull_regime']
+                neutral_regime_id = regime_info['neutral_regime']
+                
+                regime_str = regime.copy()
+                if bear_regime_id is not None:
+                    regime_str = regime_str.replace(bear_regime_id, 'bear')
+                if bull_regime_id is not None:
+                    regime_str = regime_str.replace(bull_regime_id, 'bull')
+                if neutral_regime_id is not None:
+                    regime_str = regime_str.replace(neutral_regime_id, 'neutral')
+                regime = regime_str
+        
+        # Create switch indicator
+        if switches is not None and len(switches) > 0:
+            regime_switches = pd.Series(False, index=common_idx)
+            regime_switches.loc[regime_switches.index.intersection(switches.index)] = True
+        else:
+            regime_switches = regime != regime.shift(1)
         
         log_data = []
         

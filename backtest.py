@@ -324,8 +324,16 @@ class BacktestEngine:
         
         bear_prob = probs[bear_regime].loc[common_idx]
         bull_prob = probs[bull_regime].loc[common_idx]
-        neutral_prob = probs[neutral_regime].loc[common_idx] if neutral_regime is not None else pd.Series(0, index=common_idx)
-        bull_prob_combined = bull_prob + neutral_prob if neutral_regime is not None else bull_prob.copy()
+        
+        # Handle 2-state (bull/bear only) vs 3-state (bull/neutral/bear) models
+        if neutral_regime is not None:
+            neutral_prob = probs[neutral_regime].loc[common_idx]
+            bull_prob_combined = bull_prob + neutral_prob
+        else:
+            # 2-state model: no neutral regime
+            neutral_prob = pd.Series(0, index=common_idx)
+            bull_prob_combined = bull_prob.copy()
+            print("  Using 2-state model: bull/bear only (neutral probability = 0)")
         
         # Prepare kwargs for strategy
         kwargs = {
@@ -334,7 +342,10 @@ class BacktestEngine:
             'neutral_prob': neutral_prob,
             'bull_prob_combined': bull_prob_combined,
             'bear_prob_threshold': bear_prob_threshold,
-            'bull_prob_threshold': bull_prob_threshold
+            'bull_prob_threshold': bull_prob_threshold,
+            'regime': regime.loc[common_idx],
+            'switches': switches,
+            'regime_info': regime_info
         }
         
         # Run specific strategy
@@ -432,6 +443,8 @@ class BacktestEngine:
         print(f"  Bull regime: {bull_regime} (vol: {regime_info['regime_volatilities'][bull_regime]:.4f})")
         if neutral_regime is not None:
             print(f"  Neutral regime: {neutral_regime} (vol: {regime_info['regime_volatilities'][neutral_regime]:.4f})")
+        else:
+            print(f"  Neutral regime: None (2-state model)")
         print(f"  Detected {len(switches)} regime switches")
     
     def _calculate_results(self, positions: pd.Series, transaction_cost: float, 

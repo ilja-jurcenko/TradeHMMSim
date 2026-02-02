@@ -263,6 +263,8 @@ def run_comparison(ticker = None,
         covariance_type = config.get('hmm', {}).get('covariance_type', 'diag')
         n_iter = config.get('hmm', {}).get('n_iter', 100)
         tol = config.get('hmm', {}).get('tol', 1e-3)
+        n_states = config.get('hmm', {}).get('n_states', 3)
+        random_state = config.get('hmm', {}).get('random_state', 42)
         bear_prob_threshold = config.get('hmm', {}).get('bear_prob_threshold', bear_prob_threshold)
         bull_prob_threshold = config.get('hmm', {}).get('bull_prob_threshold', bull_prob_threshold)
     else:
@@ -275,6 +277,7 @@ def run_comparison(ticker = None,
         covariance_type = 'diag'
         n_iter = 100
         tol = 1e-3
+        n_states = 3
     
     print("\n" + "="*80)
     print("BACKTESTING FRAMEWORK - ALPHA MODELS VS HMM COMPARISON")
@@ -404,7 +407,7 @@ def run_comparison(ticker = None,
             'use_regime_rebalancing': use_regime_rebalancing
         },
         'hmm': {
-            'n_states': 3,
+            'n_states': n_states,
             'random_state': 42,
             'train_window': train_window,
             'refit_every': refit_every,
@@ -497,7 +500,8 @@ def run_comparison(ticker = None,
     
     # Initialize HMM filter
     print("\nInitializing HMM regime filter...")
-    hmm_filter = HMMRegimeFilter(n_states=3, random_state=42, 
+    print(f"  Number of states: {n_states} ({'bull/bear only' if n_states == 2 else 'bull/neutral/bear'})")
+    hmm_filter = HMMRegimeFilter(n_states=n_states, random_state=42, 
                                  covariance_type=covariance_type,
                                  n_iter=n_iter,
                                  tol=tol,
@@ -606,7 +610,7 @@ def run_comparison(ticker = None,
             print(f"\n[2/6] Running {model_name} - HMM Only...")
             if is_multi_asset and use_regime_rebalancing:
                 print("  Using regime-based rebalancing: Bull/Neutral → 100% SPY, Bear → 100% AGG")
-            hmm_filter_new = HMMRegimeFilter(n_states=3, random_state=42,
+            hmm_filter_new = HMMRegimeFilter(n_states=n_states, random_state=random_state,
                                              covariance_type=covariance_type,
                                              n_iter=n_iter,
                                              tol=tol,
